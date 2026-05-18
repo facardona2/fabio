@@ -48,6 +48,10 @@ input color            InpBullColor      = clrDodgerBlue;   // Color FVG alcista
 input color            InpBearColor      = clrCrimson;      // Color FVG bajista
 input color            InpHighlightColor = clrGold;         // Color FVG sin mitigar resaltado
 input bool             InpFillZone       = true;            // Rellenar zona
+input bool             InpShow50         = true;            // Mostrar linea 50% (CE) del FVG
+input color            InpMid50Color     = clrSilver;       // Color linea 50%
+input ENUM_LINE_STYLE  InpMid50Style     = STYLE_DOT;       // Estilo linea 50%
+input int              InpMid50Width     = 1;               // Grosor linea 50%
 
 input group "=== Boton ON/OFF ==="
 input ENUM_BASE_CORNER InpBtnCorner      = CORNER_LEFT_UPPER;
@@ -251,7 +255,10 @@ void TrimOldFVGs()
    if(n <= InpMaxFVGs) return;
    int toRemove = n - InpMaxFVGs;
    for(int k = 0; k < toRemove; k++)
+   {
       ObjectDelete(0, g_fvgs[k].name);
+      ObjectDelete(0, g_fvgs[k].name + "_M50");
+   }
    for(int k = 0; k < n - toRemove; k++)
       g_fvgs[k] = g_fvgs[k + toRemove];
    ArrayResize(g_fvgs, n - toRemove);
@@ -299,6 +306,7 @@ void UpdateMitigations()
       if(mitigated && InpHideMitigated)
       {
          ObjectDelete(0, g_fvgs[k].name);
+         ObjectDelete(0, g_fvgs[k].name + "_M50");
          int n = ArraySize(g_fvgs);
          for(int m = k; m < n - 1; m++) g_fvgs[m] = g_fvgs[m + 1];
          ArrayResize(g_fvgs, n - 1);
@@ -377,12 +385,43 @@ void DrawFVG(const FVG &f)
    ObjectSetInteger(0, f.name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, f.name, OBJPROP_HIDDEN,     true);
    ObjectSetString (0, f.name, OBJPROP_TOOLTIP,
-      StringFormat("FVG %s\nTF: %s\n[%.5f - %.5f]\nSwings sin mitigar: %d%s",
+      StringFormat("FVG %s\nTF: %s\n[%.5f - %.5f]\n50%%: %.5f\nSwings sin mitigar: %d%s",
                    (f.direction==1 ? "ALCISTA" : "BAJISTA"),
                    EnumToString(g_tf),
                    f.lower, f.upper,
+                   (f.lower + f.upper) * 0.5,
                    f.swingsPassed,
                    (f.highlighted ? "\n** SIN MITIGAR / CERCA DEL PRECIO **" : "")));
+
+   // Linea del 50% (Consequent Encroachment)
+   string midName = f.name + "_M50";
+   if(InpShow50)
+   {
+      double mid = (f.lower + f.upper) * 0.5;
+      if(ObjectFind(0, midName) < 0)
+         ObjectCreate(0, midName, OBJ_TREND, 0, f.time1, mid, tEnd, mid);
+      else
+      {
+         ObjectSetInteger(0, midName, OBJPROP_TIME,  0, f.time1);
+         ObjectSetDouble (0, midName, OBJPROP_PRICE, 0, mid);
+         ObjectSetInteger(0, midName, OBJPROP_TIME,  1, tEnd);
+         ObjectSetDouble (0, midName, OBJPROP_PRICE, 1, mid);
+      }
+      ObjectSetInteger(0, midName, OBJPROP_COLOR,      InpMid50Color);
+      ObjectSetInteger(0, midName, OBJPROP_STYLE,      InpMid50Style);
+      ObjectSetInteger(0, midName, OBJPROP_WIDTH,      InpMid50Width);
+      ObjectSetInteger(0, midName, OBJPROP_RAY_LEFT,   false);
+      ObjectSetInteger(0, midName, OBJPROP_RAY_RIGHT,  false);
+      ObjectSetInteger(0, midName, OBJPROP_BACK,       false);
+      ObjectSetInteger(0, midName, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, midName, OBJPROP_HIDDEN,     true);
+      ObjectSetString (0, midName, OBJPROP_TOOLTIP,
+         StringFormat("FVG 50%% (CE): %.5f", (f.lower + f.upper) * 0.5));
+   }
+   else
+   {
+      ObjectDelete(0, midName);
+   }
 }
 
 //==================================================================
@@ -454,13 +493,19 @@ void OnChartEvent(const int id, const long &lparam,
    if(!g_enabled)
    {
       for(int k = 0; k < ArraySize(g_fvgs); k++)
-         ObjectSetInteger(0, g_fvgs[k].name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+      {
+         ObjectSetInteger(0, g_fvgs[k].name,          OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+         ObjectSetInteger(0, g_fvgs[k].name + "_M50", OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+      }
       ObjectDelete(0, g_lblName);
    }
    else
    {
       for(int k = 0; k < ArraySize(g_fvgs); k++)
-         ObjectSetInteger(0, g_fvgs[k].name, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+      {
+         ObjectSetInteger(0, g_fvgs[k].name,          OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+         ObjectSetInteger(0, g_fvgs[k].name + "_M50", OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+      }
       g_lastBar = 0; // forzar re-escaneo
    }
    ChartRedraw();
