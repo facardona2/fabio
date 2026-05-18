@@ -457,13 +457,17 @@ void PlaceSweepArrow(string name, datetime t, double price,
 
 //+------------------------------------------------------------------+
 //|  Mezcla dos colores (para variaciones de caja)                   |
+//|  En MQL5 el color se almacena como 0x00BBGGRR                    |
 //+------------------------------------------------------------------+
 color BlendColor(color c1, color c2, int pct)
 {
-   int r = (int)(GetRValue(c1) * (100 - pct) / 100 + GetRValue(c2) * pct / 100);
-   int g = (int)(GetGValue(c1) * (100 - pct) / 100 + GetGValue(c2) * pct / 100);
-   int b = (int)(GetBValue(c1) * (100 - pct) / 100 + GetBValue(c2) * pct / 100);
-   return (color)((b << 16) | (g << 8) | r);
+   int r = (int)(c1 & 0xFF)        * (100 - pct) / 100
+         + (int)(c2 & 0xFF)        * pct / 100;
+   int g = (int)((c1 >> 8)  & 0xFF) * (100 - pct) / 100
+         + (int)((c2 >> 8)  & 0xFF) * pct / 100;
+   int b = (int)((c1 >> 16) & 0xFF) * (100 - pct) / 100
+         + (int)((c2 >> 16) & 0xFF) * pct / 100;
+   return (color)(r | (g << 8) | (b << 16));
 }
 
 //+------------------------------------------------------------------+
