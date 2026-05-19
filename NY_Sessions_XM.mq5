@@ -20,25 +20,25 @@
 #property indicator_plots   3
 
 // Plot 0 – EMA rápida
-#property indicator_plot1_label "EMA 20"
-#property indicator_plot1_type  DRAW_LINE
-#property indicator_plot1_color clrCyan
-#property indicator_plot1_width 1
-#property indicator_plot1_style STYLE_SOLID
+#property indicator_label1 "EMA 20"
+#property indicator_type1  DRAW_LINE
+#property indicator_color1 clrCyan
+#property indicator_width1 1
+#property indicator_style1 STYLE_SOLID
 
 // Plot 1 – EMA media
-#property indicator_plot2_label "EMA 50"
-#property indicator_plot2_type  DRAW_LINE
-#property indicator_plot2_color clrOrange
-#property indicator_plot2_width 1
-#property indicator_plot2_style STYLE_SOLID
+#property indicator_label2 "EMA 50"
+#property indicator_type2  DRAW_LINE
+#property indicator_color2 clrOrange
+#property indicator_width2 1
+#property indicator_style2 STYLE_SOLID
 
 // Plot 2 – EMA lenta
-#property indicator_plot3_label "EMA 150"
-#property indicator_plot3_type  DRAW_LINE
-#property indicator_plot3_color clrRed
-#property indicator_plot3_width 2
-#property indicator_plot3_style STYLE_SOLID
+#property indicator_label3 "EMA 150"
+#property indicator_type3  DRAW_LINE
+#property indicator_color3 clrRed
+#property indicator_width3 2
+#property indicator_style3 STYLE_SOLID
 
 //============================================================
 //  INPUTS
