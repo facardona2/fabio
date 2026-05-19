@@ -1,18 +1,44 @@
 //+------------------------------------------------------------------+
 //|                       NY_Sessions_XM.mq5                         |
-//|   Sesiones NY · Líneas Hi/Mid · Judas Swing · Botones ON/OFF     |
+//|   Sesiones NY · EMA 20/50/150 · Judas Swing filtrado · XM        |
 //|                                                                  |
-//|  Offset defecto: Broker XM = NY + 7h  (NY 15:16 → XM 22:16)    |
-//|  S1: NY 20:30-21:00  →  XM 03:30-04:00                          |
-//|  S2: NY 01:30-02:00  →  XM 08:30-09:00                          |
-//|  S3: NY 06:30-07:00  →  XM 13:30-14:00                          |
-//|  S4: NY 13:30-14:00  →  XM 20:30-21:00                          |
+//|  LÓGICA DE SEÑALES (Judas Swing + EMA):                          |
+//|  ► BUY  = EMA20>EMA50>EMA150 (tendencia arriba)                  |
+//|           + Judas barrió mínimos previos (false breakdown)       |
+//|           + Precio tocó EMA20 o EMA50 (retroceso a media)        |
+//|           + Vela alcista de confirmación tras el barrido          |
+//|  ► SELL = EMA20<EMA50<EMA150 (tendencia abajo)                   |
+//|           + Judas barrió máximos previos (false breakout)        |
+//|           + Precio tocó EMA20 o EMA50 (retroceso a media)        |
+//|           + Vela bajista de confirmación tras el barrido          |
 //+------------------------------------------------------------------+
 #property copyright   "2024"
-#property version     "2.00"
-#property description "Sesiones NY · Líneas Hi/Mid · Judas Swing · XM"
+#property version     "3.00"
+#property description "Sesiones NY · EMA 20/50/150 · Judas Swing filtrado por tendencia · XM"
 #property indicator_chart_window
-#property indicator_plots 0
+#property indicator_buffers 3
+#property indicator_plots   3
+
+// Plot 0 – EMA rápida
+#property indicator_plot1_label "EMA 20"
+#property indicator_plot1_type  DRAW_LINE
+#property indicator_plot1_color clrCyan
+#property indicator_plot1_width 1
+#property indicator_plot1_style STYLE_SOLID
+
+// Plot 1 – EMA media
+#property indicator_plot2_label "EMA 50"
+#property indicator_plot2_type  DRAW_LINE
+#property indicator_plot2_color clrOrange
+#property indicator_plot2_width 1
+#property indicator_plot2_style STYLE_SOLID
+
+// Plot 2 – EMA lenta
+#property indicator_plot3_label "EMA 150"
+#property indicator_plot3_type  DRAW_LINE
+#property indicator_plot3_color clrRed
+#property indicator_plot3_width 2
+#property indicator_plot3_style STYLE_SOLID
 
 //============================================================
 //  INPUTS
@@ -31,7 +57,7 @@ input  string  InpS1_Name    = "NY 20:30";
 input  string  InpS1_StartNY = "20:30";
 input  string  InpS1_EndNY   = "21:00";
 input  color   InpS1_Color   = clrDodgerBlue;
-input  int     InpS1_Opacity = 60;         // Opacidad rectángulo %
+input  int     InpS1_Opacity = 60;
 
 sinput string  _s2 = "════ SESIÓN 2 ════";
 input  bool    InpS2_Enable  = true;
@@ -58,45 +84,62 @@ input  color   InpS4_Color   = clrMagenta;
 input  int     InpS4_Opacity = 60;
 
 sinput string  _s5 = "════ LÍNEAS HI / MID ════";
-input  int              InpLinesCount    = 3;           // Sesiones con líneas (0=todas)
-input  int              InpLineWidth     = 1;           // Grosor de las líneas
-input  ENUM_LINE_STYLE  InpHighLineStyle = STYLE_DASH;  // Estilo línea HIGH
-input  ENUM_LINE_STYLE  InpMidLineStyle  = STYLE_DOT;   // Estilo línea MID 50%
+input  int              InpLinesCount    = 3;
+input  int              InpLineWidth     = 1;
+input  ENUM_LINE_STYLE  InpHighLineStyle = STYLE_DASH;
+input  ENUM_LINE_STYLE  InpMidLineStyle  = STYLE_DOT;
 
 sinput string  _s6 = "════ JUDAS SWING ════";
-input  bool    InpJudas_Enable  = true;   // Activar detección Judas Swing
-input  int     InpJudas_PreBars = 10;     // Barras previas para detectar sweep
-input  int     InpJudas_ArrSize = 3;      // Tamaño flechas (1-5)
-input  color   InpJudas_BuyClr  = clrAqua;// Color flecha BUY  ▲
-input  color   InpJudas_SellClr = clrRed; // Color flecha SELL ▼
+input  bool    InpJudas_Enable   = true;
+input  int     InpJudas_PreBars  = 10;    // Barras previas para detectar sweep
+input  int     InpJudas_ArrSize  = 3;     // Tamaño flechas
+input  color   InpJudas_BuyClr   = clrAqua;
+input  color   InpJudas_SellClr  = clrRed;
+
+sinput string  _s7 = "════ FILTRO TENDENCIA EMA ════";
+input  bool    InpEMA_Enable       = true;   // Filtrar señales con EMAs
+input  int     InpEMA1             = 20;     // EMA rápida (período)
+input  int     InpEMA2             = 50;     // EMA media (período)
+input  int     InpEMA3             = 150;    // EMA lenta (período)
+input  bool    InpEMA_ShowLines    = true;   // Mostrar EMAs en gráfico al iniciar
+input  color   InpEMA1_Color       = clrCyan;    // Color EMA 20
+input  color   InpEMA2_Color       = clrOrange;  // Color EMA 50
+input  color   InpEMA3_Color       = clrRed;     // Color EMA 150
+input  int     InpEMA1_Width       = 1;
+input  int     InpEMA2_Width       = 1;
+input  int     InpEMA3_Width       = 2;
+input  bool    InpEMA_RequireTouch = true;   // Exigir que precio toque EMA20/50
+input  int     InpEMA_TouchPips    = 20;     // Tolerancia toque EMA (puntos)
+input  bool    InpEMA_RequireRev   = true;   // Exigir vela de reversión tras sweep
 
 //============================================================
-//  ESTRUCTURA PARA BLOQUES DE SESIÓN
+//  STRUCT
 //============================================================
 
 struct SessBlock
 {
    datetime t_start;
    datetime t_end;
-   int      idx_start;   // índice en time[]
-   int      idx_end;     // índice en time[] del primer bar FUERA; -1 si aún abierta
+   int      idx_start;
+   int      idx_end;     // -1 si sesión aún abierta
    double   hi;
    double   lo;
    bool     is_open;
 };
 
 //============================================================
-//  NOMBRES DE OBJETOS (constantes y prefijos)
+//  NOMBRES DE OBJETOS
 //============================================================
 
 #define BTN_S1    "NYS_B1"
 #define BTN_S2    "NYS_B2"
 #define BTN_S3    "NYS_B3"
 #define BTN_S4    "NYS_B4"
+#define BTN_EMA   "NYS_BE"
 #define LBL_TITLE "NYS_TT"
 #define LBL_CLOCK "NYS_CK"
+#define LBL_TREND "NYS_TR"
 
-// R=Rect, H=Hi line, M=Mid line, A=Arrow; 1-4=sesión
 #define PFX_R1 "NYS_R1_"
 #define PFX_R2 "NYS_R2_"
 #define PFX_R3 "NYS_R3_"
@@ -118,13 +161,16 @@ struct SessBlock
 //  ESTADO GLOBAL
 //============================================================
 
-bool g_S1_On, g_S2_On, g_S3_On, g_S4_On;
+bool   g_S1_On, g_S2_On, g_S3_On, g_S4_On;
+bool   g_EMA_On;
+int    g_S1_Judas, g_S2_Judas, g_S3_Judas, g_S4_Judas;  // 0 / 1(BUY) / -1(SELL)
+int    g_GlobalTrend = 0;   // tendencia actual para el label
 
-// Judas de la sesión más reciente:  0=ninguno  1=BUY  -1=SELL
-int g_S1_Judas, g_S2_Judas, g_S3_Judas, g_S4_Judas;
+// Buffers de indicador (para dibujar las EMAs en gráfico)
+double bufEMA20[], bufEMA50[], bufEMA150[];
 
 //============================================================
-//  INIT / DEINIT / CALCULATE / TIMER / CHARTEVENT
+//  ON INIT / DEINIT / CALCULATE / TIMER / CHARTEVENT
 //============================================================
 
 int OnInit()
@@ -133,8 +179,29 @@ int OnInit()
    g_S2_On = InpS2_Enable;
    g_S3_On = InpS3_Enable;
    g_S4_On = InpS4_Enable;
+   g_EMA_On = InpEMA_ShowLines;
    g_S1_Judas = g_S2_Judas = g_S3_Judas = g_S4_Judas = 0;
 
+   // ─── Indicadores EMA buffers ───────────────────────────────────
+   SetIndexBuffer(0, bufEMA20,  INDICATOR_DATA);
+   SetIndexBuffer(1, bufEMA50,  INDICATOR_DATA);
+   SetIndexBuffer(2, bufEMA150, INDICATOR_DATA);
+
+   PlotIndexSetString (0, PLOT_LABEL,      "EMA " + IntegerToString(InpEMA1));
+   PlotIndexSetInteger(0, PLOT_LINE_COLOR, InpEMA1_Color);
+   PlotIndexSetInteger(0, PLOT_LINE_WIDTH, InpEMA1_Width);
+
+   PlotIndexSetString (1, PLOT_LABEL,      "EMA " + IntegerToString(InpEMA2));
+   PlotIndexSetInteger(1, PLOT_LINE_COLOR, InpEMA2_Color);
+   PlotIndexSetInteger(1, PLOT_LINE_WIDTH, InpEMA2_Width);
+
+   PlotIndexSetString (2, PLOT_LABEL,      "EMA " + IntegerToString(InpEMA3));
+   PlotIndexSetInteger(2, PLOT_LINE_COLOR, InpEMA3_Color);
+   PlotIndexSetInteger(2, PLOT_LINE_WIDTH, InpEMA3_Width);
+
+   ApplyEMAVisibility();
+
+   // ─── UI ───────────────────────────────────────────────────────
    UI_Build();
    UI_RefreshButtons();
    EventSetTimer(1);
@@ -158,7 +225,17 @@ int OnCalculate(const int      rates_total,
                 const long     &volume[],
                 const int      &spread[])
 {
-   ProcessAll(rates_total, time, high, low);
+   // ─── Calcular EMAs ────────────────────────────────────────────
+   int startFrom = (prev_calculated <= 1) ? 0 : prev_calculated - 1;
+   CalcEMABuffer(close, bufEMA20,  InpEMA1, rates_total, startFrom);
+   CalcEMABuffer(close, bufEMA50,  InpEMA2, rates_total, startFrom);
+   CalcEMABuffer(close, bufEMA150, InpEMA3, rates_total, startFrom);
+
+   // ─── Tendencia actual (última barra) ─────────────────────────
+   g_GlobalTrend = GetTrendDir(rates_total - 1);
+
+   // ─── Procesar sesiones ───────────────────────────────────────
+   ProcessAll(rates_total, time, open, high, low, close);
    UI_UpdateClock();
    return rates_total;
 }
@@ -174,6 +251,18 @@ void OnChartEvent(const int id,
                   const string &sparam)
 {
    if(id != CHARTEVENT_OBJECT_CLICK) return;
+
+   // Botón EMA
+   if(sparam == BTN_EMA)
+   {
+      g_EMA_On = !g_EMA_On;
+      ApplyEMAVisibility();
+      UI_RefreshButtons();
+      ChartRedraw();
+      return;
+   }
+
+   // Botones de sesión
    bool changed = false;
    if(sparam == BTN_S1) { g_S1_On = !g_S1_On; changed = true; }
    if(sparam == BTN_S2) { g_S2_On = !g_S2_On; changed = true; }
@@ -183,6 +272,82 @@ void OnChartEvent(const int id,
 
    UI_RefreshButtons();
    RedrawFromRates();
+}
+
+//============================================================
+//  CÁLCULO DE EMAs
+//============================================================
+
+void CalcEMABuffer(const double &src[],
+                   double       &dst[],
+                   int           period,
+                   int           total,
+                   int           from)
+{
+   double k = 2.0 / (period + 1.0);
+
+   if(from <= period - 1)
+   {
+      // Inicialización completa desde cero
+      int validFrom = period - 1;
+      for(int i = 0; i < validFrom && i < total; i++)
+         dst[i] = EMPTY_VALUE;
+
+      if(total < period) return;
+
+      double sum = 0;
+      for(int i = 0; i < period; i++) sum += src[i];
+      dst[validFrom] = sum / period;
+
+      for(int i = validFrom + 1; i < total; i++)
+         dst[i] = src[i] * k + dst[i-1] * (1.0 - k);
+   }
+   else
+   {
+      // Solo actualizar barras nuevas (dst[from-1] ya es válido)
+      for(int i = from; i < total; i++)
+         dst[i] = src[i] * k + dst[i-1] * (1.0 - k);
+   }
+}
+
+// Visibilidad de los plots EMA
+void ApplyEMAVisibility()
+{
+   int dt = g_EMA_On ? DRAW_LINE : DRAW_NONE;
+   PlotIndexSetInteger(0, PLOT_DRAW_TYPE, dt);
+   PlotIndexSetInteger(1, PLOT_DRAW_TYPE, dt);
+   PlotIndexSetInteger(2, PLOT_DRAW_TYPE, dt);
+}
+
+//============================================================
+//  TENDENCIA
+//============================================================
+
+// Devuelve  1=alcista  -1=bajista  0=neutral
+int GetTrendDir(int idx)
+{
+   if(idx < 0 || idx >= ArraySize(bufEMA20)) return 0;
+   double e1 = bufEMA20[idx];
+   double e2 = bufEMA50[idx];
+   double e3 = bufEMA150[idx];
+   if(e1 == EMPTY_VALUE || e2 == EMPTY_VALUE || e3 == EMPTY_VALUE) return 0;
+   if(e1 > e2 && e2 > e3) return  1;
+   if(e1 < e2 && e2 < e3) return -1;
+   return 0;
+}
+
+string TrendText(int t)
+{
+   if(t ==  1) return "TENDENCIA ▲ ALCISTA";
+   if(t == -1) return "TENDENCIA ▼ BAJISTA";
+   return "TENDENCIA — NEUTRAL";
+}
+
+color TrendColor(int t)
+{
+   if(t ==  1) return InpJudas_BuyClr;
+   if(t == -1) return InpJudas_SellClr;
+   return clrSilver;
 }
 
 //============================================================
@@ -247,7 +412,7 @@ void ScanBlocks(const int      startBrk,
       else if(!inside && inSess)
       {
          inSess = false;
-         int n = ArraySize(blocks);
+         int n  = ArraySize(blocks);
          ArrayResize(blocks, n + 1);
          blocks[n].t_start   = time[idx_s];
          blocks[n].t_end     = time[i];
@@ -264,13 +429,124 @@ void ScanBlocks(const int      startBrk,
       int n = ArraySize(blocks);
       ArrayResize(blocks, n + 1);
       blocks[n].t_start   = time[idx_s];
-      blocks[n].t_end     = time[total - 1] + (datetime)PeriodSeconds();
+      blocks[n].t_end     = time[total-1] + (datetime)PeriodSeconds();
       blocks[n].idx_start = idx_s;
       blocks[n].idx_end   = -1;
       blocks[n].hi        = hi;
       blocks[n].lo        = lo;
       blocks[n].is_open   = true;
    }
+}
+
+//============================================================
+//  DETECCIÓN JUDAS SWING + FILTRO EMA
+//============================================================
+
+// Encuentra el bar donde ocurrió el high (wantHi=true) o low del bloque
+int FindExtremumBar(const SessBlock &blk,
+                    bool wantHi,
+                    const int total,
+                    const double &high[],
+                    const double &low[])
+{
+   int end_i = (blk.idx_end < 0) ? (total-1)
+                                  : MathMin(blk.idx_end-1, total-1);
+   double target = wantHi ? blk.hi : blk.lo;
+   for(int i = blk.idx_start; i <= end_i; i++)
+   {
+      double val = wantHi ? high[i] : low[i];
+      if(MathAbs(val - target) < _Point) return i;
+   }
+   return blk.idx_start;
+}
+
+// ──────────────────────────────────────────────────────────────────
+//  Lógica completa:
+//    1. Detecta si hubo barrido de liquidez (Judas Sweep)
+//    2. Filtra por alineación de EMAs (tendencia)
+//    3. Verifica retroceso a EMA (toque de media)
+//    4. Confirma reversión con vela en dirección de tendencia
+// ──────────────────────────────────────────────────────────────────
+int DetectJudas(const SessBlock &blk,
+                const int        total,
+                const double    &high[],
+                const double    &low[],
+                const double    &open[],
+                const double    &close[])
+{
+   if(!InpJudas_Enable || blk.is_open) return 0;
+
+   // ── 1. Sweep: ¿barrió la sesión mínimos/máximos pre-sesión? ──
+   int preStart = MathMax(0, blk.idx_start - InpJudas_PreBars);
+   if(blk.idx_start <= preStart) return 0;
+
+   double pre_hi = 0, pre_lo = DBL_MAX;
+   for(int j = preStart; j < blk.idx_start; j++)
+   {
+      if(high[j] > pre_hi) pre_hi = high[j];
+      if(low[j]  < pre_lo) pre_lo = low[j];
+   }
+
+   bool swept_hi = blk.hi > pre_hi + _Point;
+   bool swept_lo = blk.lo < pre_lo - _Point;
+
+   // Ambiguo o sin sweep → no hay señal
+   if((!swept_hi && !swept_lo) || (swept_hi && swept_lo)) return 0;
+
+   int raw = swept_lo ? 1 : -1;   // 1=BUY  -1=SELL (sin filtrar)
+
+   // ── 2. Filtro de tendencia EMA ────────────────────────────────
+   if(InpEMA_Enable)
+   {
+      int trend = GetTrendDir(blk.idx_start);
+      if(trend == 0)        return 0;   // Tendencia neutral → no operar
+      if(raw != trend)      return 0;   // Señal contra tendencia → ignorar
+
+      // ── 3. Retroceso: ¿tocó precio la EMA durante la sesión? ──
+      if(InpEMA_RequireTouch)
+      {
+         double tol = InpEMA_TouchPips * _Point;
+
+         if(raw == 1)   // BUY: low debe haber tocado EMA20 o EMA50
+         {
+            int bar_lo = FindExtremumBar(blk, false, total, high, low);
+            double e1  = bufEMA20[bar_lo];
+            double e2  = bufEMA50[bar_lo];
+            bool touched = (e1 != EMPTY_VALUE && blk.lo <= e1 + tol) ||
+                           (e2 != EMPTY_VALUE && blk.lo <= e2 + tol);
+            if(!touched) return 0;
+         }
+         else           // SELL: high debe haber tocado EMA20 o EMA50
+         {
+            int bar_hi = FindExtremumBar(blk, true, total, high, low);
+            double e1  = bufEMA20[bar_hi];
+            double e2  = bufEMA50[bar_hi];
+            bool touched = (e1 != EMPTY_VALUE && blk.hi >= e1 - tol) ||
+                           (e2 != EMPTY_VALUE && blk.hi >= e2 - tol);
+            if(!touched) return 0;
+         }
+      }
+
+      // ── 4. Confirmación: vela de reversión después del sweep ──
+      if(InpEMA_RequireRev)
+      {
+         int sweep_bar = (raw == 1)
+                         ? FindExtremumBar(blk, false, total, high, low)
+                         : FindExtremumBar(blk, true,  total, high, low);
+
+         int end_bar = (blk.idx_end < 0) ? (total-1)
+                                          : MathMin(blk.idx_end-1, total-1);
+         bool confirmed = false;
+         for(int i = sweep_bar + 1; i <= end_bar; i++)
+         {
+            if(raw ==  1 && close[i] > open[i]) { confirmed = true; break; }
+            if(raw == -1 && close[i] < open[i]) { confirmed = true; break; }
+         }
+         if(!confirmed) return 0;
+      }
+   }
+
+   return raw;
 }
 
 //============================================================
@@ -303,12 +579,10 @@ void PaintRect(const string nm,
    ObjectSetInteger(0, nm, OBJPROP_HIDDEN,     true);
 }
 
-// Línea horizontal con rayo a la derecha (OBJ_TREND + RAY_RIGHT)
 void PaintHRay(const string nm,
                datetime t_from, double price,
                color clr, ENUM_LINE_STYLE lstyle, int lw)
 {
-   // Dos puntos con el mismo precio → línea horizontal
    datetime t2 = t_from + (datetime)PeriodSeconds() * 5;
    if(ObjectFind(0, nm) < 0)
       ObjectCreate(0, nm, OBJ_TREND, 0, t_from, price, t2, price);
@@ -329,7 +603,6 @@ void PaintHRay(const string nm,
    ObjectSetInteger(0, nm, OBJPROP_BACK,       true);
 }
 
-// Flecha de Judas (▲ compra / ▼ venta)
 void PaintArrow(const string nm,
                 datetime t, double price,
                 bool isBuy, color clr, int sz)
@@ -341,75 +614,20 @@ void PaintArrow(const string nm,
       ObjectSetInteger(0, nm, OBJPROP_TIME,  0, t);
       ObjectSetDouble (0, nm, OBJPROP_PRICE, 0, price);
    }
-   // 233 = ▲  241 = flecha arriba sólida  |  234 = ▼  242 = flecha abajo sólida
-   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE, isBuy ? 233 : 234);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR,     clr);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH,     sz);
-   // BUY: ancla en TOP → la punta superior del glifo queda en el low (flecha cuelga abajo)
-   // SELL: ancla en BOTTOM → la punta inferior del glifo queda en el high (flecha apunta abajo)
-   ObjectSetInteger(0, nm, OBJPROP_ANCHOR,    isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE,false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN,    true);
+   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE,  isBuy ? 233 : 234);  // ▲ / ▼
+   ObjectSetInteger(0, nm, OBJPROP_COLOR,      clr);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH,      sz);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR,     isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN,     true);
 }
 
-// Borra todos los objetos cuyo nombre empieza con pfx
-void DeletePfx(const string pfx)
-{
-   ObjectsDeleteAll(0, pfx);
-}
-
-//============================================================
-//  DETECCIÓN JUDAS SWING
-//============================================================
-
-// Devuelve: 1=BUY (swept lows→espera alza)  -1=SELL (swept highs→espera baja)  0=ninguno
-int DetectJudas(const SessBlock &blk,
-                const int total,
-                const double &high[],
-                const double &low[])
-{
-   if(!InpJudas_Enable || blk.is_open) return 0;
-   int preStart = MathMax(0, blk.idx_start - InpJudas_PreBars);
-   int preEnd   = blk.idx_start;
-   if(preEnd <= preStart) return 0;
-
-   double pre_hi = 0, pre_lo = DBL_MAX;
-   for(int j = preStart; j < preEnd; j++)
-   {
-      if(high[j] > pre_hi) pre_hi = high[j];
-      if(low[j]  < pre_lo) pre_lo = low[j];
-   }
-
-   bool swept_hi = blk.hi > pre_hi + _Point;
-   bool swept_lo = blk.lo < pre_lo - _Point;
-
-   if(swept_hi && !swept_lo) return -1;  // Barrió máximos → SELL (Judas alcista falso)
-   if(swept_lo && !swept_hi) return  1;  // Barrió mínimos → BUY  (Judas bajista falso)
-   return 0;
-}
-
-// Encuentra el índice de barra donde ocurrió el high/low extremo del bloque
-int FindExtremumBar(const SessBlock &blk,
-                    bool wantHi,
-                    const int total,
-                    const double &high[],
-                    const double &low[])
-{
-   int end_i = (blk.idx_end < 0) ? (total - 1) : MathMin(blk.idx_end - 1, total - 1);
-   double target = wantHi ? blk.hi : blk.lo;
-   for(int i = blk.idx_start; i <= end_i; i++)
-   {
-      double val = wantHi ? high[i] : low[i];
-      if(MathAbs(val - target) < _Point) return i;
-   }
-   return blk.idx_start;
-}
+void DeletePfx(const string pfx) { ObjectsDeleteAll(0, pfx); }
 
 //============================================================
 //  PROCESAMIENTO POR SESIÓN
 //============================================================
 
-// Procesa una sesión completa y devuelve el Judas de la sesión más reciente cerrada
 int ProcessSession(const string pfx_r,
                    const string pfx_h,
                    const string pfx_m,
@@ -420,57 +638,47 @@ int ProcessSession(const string pfx_r,
                    const int    opacity,
                    const int    total,
                    const datetime &time[],
+                   const double   &open[],
                    const double   &high[],
-                   const double   &low[])
+                   const double   &low[],
+                   const double   &close[])
 {
-   // 1. Escanear bloques de esta sesión
    SessBlock blocks[];
    ScanBlocks(startBrk, endBrk, total, time, high, low, blocks);
    int nBlocks = ArraySize(blocks);
 
-   // 2. Borrar todos los objetos previos de esta sesión
-   DeletePfx(pfx_r);
-   DeletePfx(pfx_h);
-   DeletePfx(pfx_m);
-   DeletePfx(pfx_a);
+   DeletePfx(pfx_r); DeletePfx(pfx_h);
+   DeletePfx(pfx_m); DeletePfx(pfx_a);
 
    if(nBlocks == 0) return 0;
 
-   // 3. Rectángulos para todos los bloques
+   // Rectángulos para todos los bloques
    for(int i = 0; i < nBlocks; i++)
       PaintRect(pfx_r + IntegerToString(i),
                 blocks[i].t_start, blocks[i].t_end,
-                blocks[i].hi,      blocks[i].lo,
-                clr, opacity);
+                blocks[i].hi, blocks[i].lo, clr, opacity);
 
-   // 4. Líneas Hi / Mid y flechas para los últimos InpLinesCount bloques
-   int maxL    = (InpLinesCount <= 0) ? nBlocks : MathMin(InpLinesCount, nBlocks);
+   // Líneas y flechas para los últimos N bloques
+   int maxL     = (InpLinesCount <= 0) ? nBlocks : MathMin(InpLinesCount, nBlocks);
    int lineFrom = nBlocks - maxL;
-   int last_judas = 0;
+   int last_j   = 0;
 
    for(int i = lineFrom; i < nBlocks; i++)
    {
       double mid = (blocks[i].hi + blocks[i].lo) * 0.5;
 
-      // --- Línea HIGH → derecha infinita
-      PaintHRay(pfx_h + IntegerToString(i),
-                blocks[i].t_end, blocks[i].hi,
+      PaintHRay(pfx_h + IntegerToString(i), blocks[i].t_end, blocks[i].hi,
                 clr, InpHighLineStyle, InpLineWidth);
+      PaintHRay(pfx_m + IntegerToString(i), blocks[i].t_end, mid,
+                clr, InpMidLineStyle,  InpLineWidth);
 
-      // --- Línea MID 50% → derecha infinita
-      PaintHRay(pfx_m + IntegerToString(i),
-                blocks[i].t_end, mid,
-                clr, InpMidLineStyle, InpLineWidth);
-
-      // --- Judas Swing: solo en bloques cerrados
-      if(InpJudas_Enable && !blocks[i].is_open)
+      if(!blocks[i].is_open)
       {
-         int jType = DetectJudas(blocks[i], total, high, low);
-         last_judas = jType;   // el último bloque cerrado define el estado del panel
+         int jType = DetectJudas(blocks[i], total, high, low, open, close);
+         last_j    = jType;
 
          if(jType == -1)
          {
-            // SELL: swept máximos → flecha ▼ sobre el high de la sesión
             int barHi = FindExtremumBar(blocks[i], true,  total, high, low);
             PaintArrow(pfx_a + IntegerToString(i),
                        time[barHi], high[barHi],
@@ -478,7 +686,6 @@ int ProcessSession(const string pfx_r,
          }
          else if(jType == 1)
          {
-            // BUY: swept mínimos → flecha ▲ bajo el low de la sesión
             int barLo = FindExtremumBar(blocks[i], false, total, high, low);
             PaintArrow(pfx_a + IntegerToString(i),
                        time[barLo], low[barLo],
@@ -486,59 +693,49 @@ int ProcessSession(const string pfx_r,
          }
       }
    }
-   return last_judas;
+   return last_j;
 }
 
-// Orquesta las 4 sesiones
+// ─── Orquesta las 4 sesiones ──────────────────────────────────────
 void ProcessAll(const int      total,
                 const datetime &time[],
+                const double   &open[],
                 const double   &high[],
-                const double   &low[])
+                const double   &low[],
+                const double   &close[])
 {
    if(g_S1_On)
       g_S1_Judas = ProcessSession(PFX_R1,PFX_H1,PFX_M1,PFX_A1,
-                     NY2Brk(ParseMin(InpS1_StartNY)), NY2Brk(ParseMin(InpS1_EndNY)),
-                     InpS1_Color, InpS1_Opacity, total, time, high, low);
+         NY2Brk(ParseMin(InpS1_StartNY)), NY2Brk(ParseMin(InpS1_EndNY)),
+         InpS1_Color, InpS1_Opacity, total, time, open, high, low, close);
    else
-   {
-      DeletePfx(PFX_R1); DeletePfx(PFX_H1); DeletePfx(PFX_M1); DeletePfx(PFX_A1);
-      g_S1_Judas = 0;
-   }
+   { DeletePfx(PFX_R1); DeletePfx(PFX_H1); DeletePfx(PFX_M1); DeletePfx(PFX_A1); g_S1_Judas=0; }
 
    if(g_S2_On)
       g_S2_Judas = ProcessSession(PFX_R2,PFX_H2,PFX_M2,PFX_A2,
-                     NY2Brk(ParseMin(InpS2_StartNY)), NY2Brk(ParseMin(InpS2_EndNY)),
-                     InpS2_Color, InpS2_Opacity, total, time, high, low);
+         NY2Brk(ParseMin(InpS2_StartNY)), NY2Brk(ParseMin(InpS2_EndNY)),
+         InpS2_Color, InpS2_Opacity, total, time, open, high, low, close);
    else
-   {
-      DeletePfx(PFX_R2); DeletePfx(PFX_H2); DeletePfx(PFX_M2); DeletePfx(PFX_A2);
-      g_S2_Judas = 0;
-   }
+   { DeletePfx(PFX_R2); DeletePfx(PFX_H2); DeletePfx(PFX_M2); DeletePfx(PFX_A2); g_S2_Judas=0; }
 
    if(g_S3_On)
       g_S3_Judas = ProcessSession(PFX_R3,PFX_H3,PFX_M3,PFX_A3,
-                     NY2Brk(ParseMin(InpS3_StartNY)), NY2Brk(ParseMin(InpS3_EndNY)),
-                     InpS3_Color, InpS3_Opacity, total, time, high, low);
+         NY2Brk(ParseMin(InpS3_StartNY)), NY2Brk(ParseMin(InpS3_EndNY)),
+         InpS3_Color, InpS3_Opacity, total, time, open, high, low, close);
    else
-   {
-      DeletePfx(PFX_R3); DeletePfx(PFX_H3); DeletePfx(PFX_M3); DeletePfx(PFX_A3);
-      g_S3_Judas = 0;
-   }
+   { DeletePfx(PFX_R3); DeletePfx(PFX_H3); DeletePfx(PFX_M3); DeletePfx(PFX_A3); g_S3_Judas=0; }
 
    if(g_S4_On)
       g_S4_Judas = ProcessSession(PFX_R4,PFX_H4,PFX_M4,PFX_A4,
-                     NY2Brk(ParseMin(InpS4_StartNY)), NY2Brk(ParseMin(InpS4_EndNY)),
-                     InpS4_Color, InpS4_Opacity, total, time, high, low);
+         NY2Brk(ParseMin(InpS4_StartNY)), NY2Brk(ParseMin(InpS4_EndNY)),
+         InpS4_Color, InpS4_Opacity, total, time, open, high, low, close);
    else
-   {
-      DeletePfx(PFX_R4); DeletePfx(PFX_H4); DeletePfx(PFX_M4); DeletePfx(PFX_A4);
-      g_S4_Judas = 0;
-   }
+   { DeletePfx(PFX_R4); DeletePfx(PFX_H4); DeletePfx(PFX_M4); DeletePfx(PFX_A4); g_S4_Judas=0; }
 
    UI_RefreshButtons();
 }
 
-// Obtiene datos vía CopyRates y fuerza redibujado (usado en OnChartEvent)
+// ─── Redibuja usando CopyRates (desde OnChartEvent) ───────────────
 void RedrawFromRates()
 {
    MqlRates r[];
@@ -546,10 +743,15 @@ void RedrawFromRates()
                      MathMin(InpLookback + 20, Bars(_Symbol, _Period)), r);
    if(n < 2) return;
 
-   datetime t[]; double hi[], lo[];
-   ArrayResize(t, n); ArrayResize(hi, n); ArrayResize(lo, n);
-   for(int i = 0; i < n; i++) { t[i]=r[i].time; hi[i]=r[i].high; lo[i]=r[i].low; }
-   ProcessAll(n, t, hi, lo);
+   datetime t[]; double op[], hi[], lo[], cl[];
+   ArrayResize(t,  n); ArrayResize(op, n);
+   ArrayResize(hi, n); ArrayResize(lo, n); ArrayResize(cl, n);
+   for(int i = 0; i < n; i++)
+   {
+      t[i]=r[i].time; op[i]=r[i].open;
+      hi[i]=r[i].high; lo[i]=r[i].low; cl[i]=r[i].close;
+   }
+   ProcessAll(n, t, op, hi, lo, cl);
    ChartRedraw();
 }
 
@@ -562,10 +764,13 @@ void UI_Build()
    int y = InpPanelY;
    MakeLabel(LBL_TITLE, 10, y,      "  NY SESSIONS  XM  ", clrGold,   9, true);
    MakeLabel(LBL_CLOCK, 10, y + 15, "NY --:--:--  |  XM --:--:--", clrSilver, 8, false);
-   MakeButton(BTN_S1, 10, y + 33,  185, 24, "", InpS1_Color);
-   MakeButton(BTN_S2, 10, y + 61,  185, 24, "", InpS2_Color);
-   MakeButton(BTN_S3, 10, y + 89,  185, 24, "", InpS3_Color);
-   MakeButton(BTN_S4, 10, y + 117, 185, 24, "", InpS4_Color);
+   MakeLabel(LBL_TREND, 10, y + 27, "TENDENCIA — NEUTRAL", clrSilver, 8, true);
+
+   MakeButton(BTN_S1,  10, y + 42,  190, 23, "", InpS1_Color);
+   MakeButton(BTN_S2,  10, y + 69,  190, 23, "", InpS2_Color);
+   MakeButton(BTN_S3,  10, y + 96,  190, 23, "", InpS3_Color);
+   MakeButton(BTN_S4,  10, y + 123, 190, 23, "", InpS4_Color);
+   MakeButton(BTN_EMA, 10, y + 151, 190, 20, "", clrSlateBlue);
 }
 
 string JudasTag(int jType)
@@ -577,25 +782,15 @@ string JudasTag(int jType)
 
 void UI_RefreshButtons()
 {
-   struct BI
-   {
-      string btn;
-      bool   on;
-      string name, sNY, eNY;
-      color  col;
-      int    judas;
-   };
+   struct BI { string btn; bool on; string nm, sNY, eNY; color col; int judas; };
    BI b[4];
-   b[0].btn=BTN_S1; b[0].on=g_S1_On; b[0].name=InpS1_Name;
+   b[0].btn=BTN_S1; b[0].on=g_S1_On; b[0].nm=InpS1_Name;
    b[0].sNY=InpS1_StartNY; b[0].eNY=InpS1_EndNY; b[0].col=InpS1_Color; b[0].judas=g_S1_Judas;
-
-   b[1].btn=BTN_S2; b[1].on=g_S2_On; b[1].name=InpS2_Name;
+   b[1].btn=BTN_S2; b[1].on=g_S2_On; b[1].nm=InpS2_Name;
    b[1].sNY=InpS2_StartNY; b[1].eNY=InpS2_EndNY; b[1].col=InpS2_Color; b[1].judas=g_S2_Judas;
-
-   b[2].btn=BTN_S3; b[2].on=g_S3_On; b[2].name=InpS3_Name;
+   b[2].btn=BTN_S3; b[2].on=g_S3_On; b[2].nm=InpS3_Name;
    b[2].sNY=InpS3_StartNY; b[2].eNY=InpS3_EndNY; b[2].col=InpS3_Color; b[2].judas=g_S3_Judas;
-
-   b[3].btn=BTN_S4; b[3].on=g_S4_On; b[3].name=InpS4_Name;
+   b[3].btn=BTN_S4; b[3].on=g_S4_On; b[3].nm=InpS4_Name;
    b[3].sNY=InpS4_StartNY; b[3].eNY=InpS4_EndNY; b[3].col=InpS4_Color; b[3].judas=g_S4_Judas;
 
    for(int i = 0; i < 4; i++)
@@ -603,19 +798,32 @@ void UI_RefreshButtons()
       int bs = NY2Brk(ParseMin(b[i].sNY));
       int be = NY2Brk(ParseMin(b[i].eNY));
       string xm  = StringFormat("%02d:%02d-%02d:%02d XM", bs/60,bs%60, be/60,be%60);
-      string lbl = (b[i].on ? "ON " : "OFF") + " " + b[i].name + " | " + xm + JudasTag(b[i].judas);
+      string lbl = (b[i].on ? "ON " : "OFF") + " " + b[i].nm + " | " + xm + JudasTag(b[i].judas);
 
-      // Color del botón: sesión OFF → gris; ON con Judas → color de la flecha; ON normal → color sesión
       color bg;
-      if(!b[i].on)               bg = clrDimGray;
-      else if(b[i].judas ==  1)  bg = InpJudas_BuyClr;
-      else if(b[i].judas == -1)  bg = InpJudas_SellClr;
-      else                       bg = b[i].col;
+      if(!b[i].on)             bg = clrDimGray;
+      else if(b[i].judas ==  1) bg = InpJudas_BuyClr;
+      else if(b[i].judas == -1) bg = InpJudas_SellClr;
+      else                      bg = b[i].col;
 
       ObjectSetString (0, b[i].btn, OBJPROP_TEXT,    lbl);
       ObjectSetInteger(0, b[i].btn, OBJPROP_BGCOLOR, bg);
       ObjectSetInteger(0, b[i].btn, OBJPROP_COLOR,   clrWhite);
    }
+
+   // Botón EMA
+   string emaLbl = "EMA " + IntegerToString(InpEMA1) + "/" +
+                   IntegerToString(InpEMA2) + "/" +
+                   IntegerToString(InpEMA3) +
+                   (g_EMA_On ? " [VISIBLE]" : " [OCULTO]");
+   ObjectSetString (0, BTN_EMA, OBJPROP_TEXT,    emaLbl);
+   ObjectSetInteger(0, BTN_EMA, OBJPROP_BGCOLOR, g_EMA_On ? clrSlateBlue : clrDimGray);
+   ObjectSetInteger(0, BTN_EMA, OBJPROP_COLOR,   clrWhite);
+
+   // Label de tendencia
+   ObjectSetString (0, LBL_TREND, OBJPROP_TEXT,  TrendText(g_GlobalTrend));
+   ObjectSetInteger(0, LBL_TREND, OBJPROP_COLOR, TrendColor(g_GlobalTrend));
+
    ChartRedraw();
 }
 
@@ -629,14 +837,18 @@ void UI_UpdateClock()
    string txt = StringFormat("NY %02d:%02d:%02d  |  XM %02d:%02d:%02d",
                               dN.hour,dN.min,dN.sec, dB.hour,dB.min,dB.sec);
    ObjectSetString(0, LBL_CLOCK, OBJPROP_TEXT, txt);
+
+   // Actualizar tendencia actual también en el timer
+   g_GlobalTrend = GetTrendDir(ArraySize(bufEMA20) - 1);
+   ObjectSetString (0, LBL_TREND, OBJPROP_TEXT,  TrendText(g_GlobalTrend));
+   ObjectSetInteger(0, LBL_TREND, OBJPROP_COLOR, TrendColor(g_GlobalTrend));
+
    ChartRedraw();
 }
 
-//--- Helpers UI
+//--- Helpers de objetos UI
 
-void MakeButton(const string name,
-                int x, int y, int w, int h,
-                string txt, color bg)
+void MakeButton(const string name, int x, int y, int w, int h, string txt, color bg)
 {
    if(ObjectFind(0, name) >= 0) ObjectDelete(0, name);
    ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0);
@@ -655,9 +867,7 @@ void MakeButton(const string name,
    ObjectSetInteger(0, name, OBJPROP_HIDDEN,       true);
 }
 
-void MakeLabel(const string name,
-               int x, int y,
-               string txt, color clr, int fs, bool bold)
+void MakeLabel(const string name, int x, int y, string txt, color clr, int fs, bool bold)
 {
    if(ObjectFind(0, name) >= 0) ObjectDelete(0, name);
    ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
@@ -681,7 +891,8 @@ void Cleanup()
    for(int i = 0; i < ArraySize(pfx); i++) DeletePfx(pfx[i]);
    ObjectDelete(0, BTN_S1); ObjectDelete(0, BTN_S2);
    ObjectDelete(0, BTN_S3); ObjectDelete(0, BTN_S4);
-   ObjectDelete(0, LBL_TITLE); ObjectDelete(0, LBL_CLOCK);
+   ObjectDelete(0, BTN_EMA);
+   ObjectDelete(0, LBL_TITLE); ObjectDelete(0, LBL_CLOCK); ObjectDelete(0, LBL_TREND);
    ChartRedraw();
 }
 //+------------------------------------------------------------------+
