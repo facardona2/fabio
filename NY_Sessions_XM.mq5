@@ -197,8 +197,8 @@ void PaintRect(const string name,
                const double   top, const double   bot,
                const color    clr, const int      opacityPct)
 {
-   uchar alpha = (uchar)(opacityPct * 255 / 100);
-   color argbColor = ColorToARGB(clr, alpha);
+   uchar alpha    = (uchar)(opacityPct * 255 / 100);
+   uint  argbColor = ColorToARGB(clr, alpha);
 
    if(ObjectFind(0, name) < 0)
       ObjectCreate(0, name, OBJ_RECTANGLE, 0, t1, top, t2, bot);
