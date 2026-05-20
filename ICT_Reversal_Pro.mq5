@@ -1262,7 +1262,7 @@ void DrawSignalLabel(string nm, datetime t, double price,
     ObjectSetInteger(0, nm, OBJPROP_COLOR,   clr);
     ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, 7);
     ObjectSetInteger(0, nm, OBJPROP_ANCHOR,
-        isUp ? ANCHOR_UPPER_RIGHT : ANCHOR_LOWER_RIGHT);
+        isUp ? ANCHOR_RIGHT_UPPER : ANCHOR_RIGHT_LOWER);
     ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
 }
 //+------------------------------------------------------------------+
