@@ -61,17 +61,19 @@ input int   InpSwingStr    = 5;   // Fuerza del pivote (barras a cada lado)
 input int   InpSwingLook   = 60;  // Lookback HTF (barras)
 input int   InpEQHTol      = 5;   // Tolerancia Equal Highs/Lows (pips)
 
-input group "══════ KILL ZONES (Hora Servidor GMT) ══════"
+input group "══════ KILL ZONES — Hora Nueva York ══════"
 input bool  InpShowKZ      = true;  // Mostrar Kill Zones
 input bool  InpKZFilter    = true;  // Señales SOLO en Kill Zones
-input int   InpAsianH1     = 21;   // Asian KZ inicio (hora GMT)
-input int   InpAsianH2     = 0;    // Asian KZ fin (hora GMT)
-input int   InpLondonH1    = 2;    // London KZ inicio (hora GMT)
-input int   InpLondonH2    = 5;    // London KZ fin (hora GMT)
-input int   InpNYH1        = 7;    // NY AM KZ inicio (hora GMT)
-input int   InpNYH2        = 10;   // NY AM KZ fin (hora GMT)
-input int   InpNYPmH1      = 13;   // NY PM/London Close KZ inicio
-input int   InpNYPmH2      = 16;   // NY PM/London Close KZ fin
+input int   InpBrokerGMT   = 2;    // GMT del broker (XM = 2, FTMO = 2, IC Markets = 2)
+// Horarios en hora de Nueva York (conversión automática al servidor)
+input int   InpAsianNY1    = 20;   // Asian KZ inicio NY (8 PM)
+input int   InpAsianNY2    = 0;    // Asian KZ fin NY (Midnight)
+input int   InpLondonNY1   = 2;    // London Open KZ inicio NY (2 AM)
+input int   InpLondonNY2   = 5;    // London Open KZ fin NY (5 AM)
+input int   InpNYAMH1      = 7;    // NY AM KZ inicio NY (7 AM)
+input int   InpNYAMH2      = 10;   // NY AM KZ fin NY (10 AM)
+input int   InpNYPmH1      = 13;   // NY PM KZ inicio NY (1 PM)
+input int   InpNYPmH2      = 16;   // NY PM KZ fin NY (4 PM)
 
 input group "══════ ELEMENTOS VISUALES ══════"
 input bool  InpShowOB      = true;  // Mostrar Order Blocks
@@ -230,6 +232,29 @@ int OnInit()
         EnumToString(InpHTF2) + "]");
 
     ObjectsDeleteAll(0, PFXO);
+
+    // Diagnóstico: imprimir horarios convertidos al log de MT5
+    datetime now = TimeCurrent();
+    bool dst     = IsUSDST(now);
+    string dstTxt = dst ? "Verano (EDT, NY=GMT-4)" : "Invierno (EST, NY=GMT-5)";
+    int off = InpBrokerGMT - (dst ? -4 : -5);
+    PrintFormat("=== ICT Reversal Pro — Kill Zones (GMT%+d, NY offset=%+dh) ===",
+                InpBrokerGMT, off);
+    PrintFormat("Horario EEUU: %s", dstTxt);
+    PrintFormat("Asian     KZ  Servidor: %02d:00 - %02d:00  (NY: %02d:00-%02d:00)",
+                NYtoServer(InpAsianNY1,now), NYtoServer(InpAsianNY2,now),
+                InpAsianNY1, InpAsianNY2);
+    PrintFormat("London    KZ  Servidor: %02d:00 - %02d:00  (NY: %02d:00-%02d:00)",
+                NYtoServer(InpLondonNY1,now), NYtoServer(InpLondonNY2,now),
+                InpLondonNY1, InpLondonNY2);
+    PrintFormat("NY AM     KZ  Servidor: %02d:00 - %02d:00  (NY: %02d:00-%02d:00)",
+                NYtoServer(InpNYAMH1,now), NYtoServer(InpNYAMH2,now),
+                InpNYAMH1, InpNYAMH2);
+    PrintFormat("NY PM     KZ  Servidor: %02d:00 - %02d:00  (NY: %02d:00-%02d:00)",
+                NYtoServer(InpNYPmH1,now), NYtoServer(InpNYPmH2,now),
+                InpNYPmH1, InpNYPmH2);
+    Print("(Verifica en: Herramientas → Terminal → pestaña Expertos)");
+
     return INIT_SUCCEEDED;
 }
 
@@ -708,25 +733,79 @@ void DetectCHOCH(const datetime &t[], const double &h[],
 }
 
 //=================================================================
-//  KILL ZONE: ¿Estamos dentro?
+//  DST: ¿Está EEUU en horario de verano? (EDT = GMT-4 / EST = GMT-5)
+//  DST inicia: 2do domingo de marzo a las 2 AM
+//  DST termina: 1er domingo de noviembre a las 2 AM
 //=================================================================
+bool IsUSDST(datetime t)
+{
+    MqlDateTime dt;
+    TimeToStruct(t, dt);
+    int month = dt.mon;
+    int day   = dt.day;
+    int hour  = dt.hour;
+
+    if(month < 3 || month > 11) return false;   // Ene-Feb, Dic = EST
+    if(month > 3 && month < 11) return true;    // Abr-Oct = EDT
+
+    // Calcular día de semana del día 1 del mes usando StringToTime
+    string dateStr = StringFormat("%04d.%02d.01 12:00", dt.year, month);
+    MqlDateTime d1;
+    TimeToStruct(StringToTime(dateStr), d1);
+    int wday1 = d1.day_of_week;  // 0=Dom, 1=Lun ... 6=Sáb
+
+    if(month == 3)  // DST inicia 2do domingo
+    {
+        int firstSun  = 1 + ((7 - wday1) % 7);
+        int secondSun = firstSun + 7;
+        return (day > secondSun || (day == secondSun && hour >= 2));
+    }
+    // month == 11: DST termina 1er domingo
+    int firstSun = 1 + ((7 - wday1) % 7);
+    return (day < firstSun || (day == firstSun && hour < 2));
+}
+
+//=================================================================
+//  Convertir hora de Nueva York → hora del servidor del broker
+//=================================================================
+int NYtoServer(int nyHour, datetime t)
+{
+    int nyUTC  = IsUSDST(t) ? -4 : -5;         // EDT=-4  /  EST=-5
+    int offset = InpBrokerGMT - nyUTC;          // Diferencia NY→Servidor
+    int srv    = (nyHour + offset) % 24;
+    if(srv < 0) srv += 24;
+    return srv;
+}
+
+//=================================================================
+//  KILL ZONE: ¿Estamos dentro? (usa hora NY convertida al servidor)
+//=================================================================
+bool IsKZRange(int h, int svH1, int svH2)
+{
+    if(svH1 == svH2) return false;
+    if(svH1 > svH2)  return (h >= svH1 || h < svH2);  // Cruza medianoche
+    return (h >= svH1 && h < svH2);
+}
+
 bool IsKillZone(datetime t)
 {
     MqlDateTime dt;
     TimeToStruct(t, dt);
     int h = dt.hour;
 
-    // Asian KZ (puede cruzar medianoche)
-    if(InpAsianH1 > InpAsianH2)
-    {
-        if(h >= InpAsianH1 || h < InpAsianH2) return true;
-    }
-    else if(h >= InpAsianH1 && h < InpAsianH2) return true;
+    int asianSrv1  = NYtoServer(InpAsianNY1,  t);
+    int asianSrv2  = NYtoServer(InpAsianNY2,  t);
+    int londonSrv1 = NYtoServer(InpLondonNY1, t);
+    int londonSrv2 = NYtoServer(InpLondonNY2, t);
+    int nyAmSrv1   = NYtoServer(InpNYAMH1,    t);
+    int nyAmSrv2   = NYtoServer(InpNYAMH2,    t);
+    int nyPmSrv1   = NYtoServer(InpNYPmH1,    t);
+    int nyPmSrv2   = NYtoServer(InpNYPmH2,    t);
 
-    if(h >= InpLondonH1 && h < InpLondonH2) return true;   // London
-    if(h >= InpNYH1     && h < InpNYH2)     return true;   // NY AM
-    if(h >= InpNYPmH1   && h < InpNYPmH2)   return true;   // NY PM
-
+    if(IsKZRange(h, asianSrv1,  asianSrv2))  return true;
+    if(IsKZRange(h, londonSrv1, londonSrv2)) return true;
+    if(IsKZRange(h, nyAmSrv1,   nyAmSrv2))   return true;
+    if(IsKZRange(h, nyPmSrv1,   nyPmSrv2))   return true;
     return false;
 }
 
@@ -736,15 +815,19 @@ string GetKZName(datetime t)
     TimeToStruct(t, dt);
     int h = dt.hour;
 
-    if(InpAsianH1 > InpAsianH2)
-    {
-        if(h >= InpAsianH1 || h < InpAsianH2) return "Asian";
-    }
-    else if(h >= InpAsianH1 && h < InpAsianH2) return "Asian";
+    int asianSrv1  = NYtoServer(InpAsianNY1,  t);
+    int asianSrv2  = NYtoServer(InpAsianNY2,  t);
+    int londonSrv1 = NYtoServer(InpLondonNY1, t);
+    int londonSrv2 = NYtoServer(InpLondonNY2, t);
+    int nyAmSrv1   = NYtoServer(InpNYAMH1,    t);
+    int nyAmSrv2   = NYtoServer(InpNYAMH2,    t);
+    int nyPmSrv1   = NYtoServer(InpNYPmH1,    t);
+    int nyPmSrv2   = NYtoServer(InpNYPmH2,    t);
 
-    if(h >= InpLondonH1 && h < InpLondonH2) return "London Open";
-    if(h >= InpNYH1     && h < InpNYH2)     return "NY AM";
-    if(h >= InpNYPmH1   && h < InpNYPmH2)   return "NY PM";
+    if(IsKZRange(h, asianSrv1,  asianSrv2))  return "Asian";
+    if(IsKZRange(h, londonSrv1, londonSrv2)) return "London Open";
+    if(IsKZRange(h, nyAmSrv1,   nyAmSrv2))   return "NY AM";
+    if(IsKZRange(h, nyPmSrv1,   nyPmSrv2))   return "NY PM";
     return "";
 }
 
