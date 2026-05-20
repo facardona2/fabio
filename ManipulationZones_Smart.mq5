@@ -100,9 +100,7 @@ input int    InpEMA3Period = 150;         // Periodo EMA 3 (lenta)
 input color  InpEMA1Color  = clrDodgerBlue;
 input color  InpEMA2Color  = clrOrange;
 input color  InpEMA3Color  = clrMagenta;
-input bool   InpShowEMA1   = true;        // Mostrar EMA 1 al inicio
-input bool   InpShowEMA2   = true;        // Mostrar EMA 2 al inicio
-input bool   InpShowEMA3   = true;        // Mostrar EMA 3 al inicio
+input bool   InpShowEMAs   = true;        // Mostrar EMAs al inicio
 
 input group "=== TENDENCIA MTF ==="
 input bool   InpAlerts    = true;  // Alertas pop-up al cambiar tendencia
@@ -131,7 +129,7 @@ double       g_bufE3[];
 int          g_hE1 = INVALID_HANDLE;
 int          g_hE2 = INVALID_HANDLE;
 int          g_hE3 = INVALID_HANDLE;
-bool         g_emaOn[3];
+bool         g_emaOn;
 
 // EMAs para calculo de tendencia multi-TF (no se dibujan)
 int g_hFM1 = INVALID_HANDLE, g_hSM1 = INVALID_HANDLE;
@@ -178,9 +176,7 @@ int OnInit()
    PlotIndexSetDouble(1,  PLOT_EMPTY_VALUE, EMPTY_VALUE);
    PlotIndexSetDouble(2,  PLOT_EMPTY_VALUE, EMPTY_VALUE);
 
-   g_emaOn[0] = InpShowEMA1;
-   g_emaOn[1] = InpShowEMA2;
-   g_emaOn[2] = InpShowEMA3;
+   g_emaOn = InpShowEMAs;
    ApplyEmaVisibility();
 
    // --- Handles EMAs visibles (current TF) ---
@@ -286,20 +282,14 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam,
       }
    }
 
-   // --- Botones de EMAs ---
-   for(int e = 0; e < 3; e++)
+   // --- Boton EMAs ---
+   if(sparam == PFX+"EmaBtn_BG" || sparam == PFX+"EmaBtn_TXT")
    {
-      string bgN  = StringFormat("%sEma%d_BG",  PFX, e);
-      string txtN = StringFormat("%sEma%d_TXT", PFX, e);
-
-      if(sparam == bgN || sparam == txtN)
-      {
-         g_emaOn[e] = !g_emaOn[e];
-         UpdateEmaButtonVisual(e);
-         ApplyEmaVisibility();
-         ChartRedraw(0);
-         return;
-      }
+      g_emaOn = !g_emaOn;
+      UpdateEmaButtonVisual();
+      ApplyEmaVisibility();
+      ChartRedraw(0);
+      return;
    }
 }
 
@@ -459,8 +449,8 @@ void UpdateTrendPanel()
 
    ENUM_TIMEFRAMES tf = Period();
    string          tfStr = TFStr(tf);
-   // Y base: 4 zonas (28*4) + 3 emas (28*3) + separadores/titulos
-   int             y = InpPY + 290;
+   // Y base: 4 zonas (28*4) + 1 boton EMA + separadores/titulos
+   int             y = InpPY + 240;
 
    TLbl("HDR", InpPX+5, y,
         "--- TENDENCIA | TF: " + tfStr + " ---",
@@ -570,14 +560,14 @@ string TFStr(ENUM_TIMEFRAMES tf)
 //============================================================
 
 #define PW  215
-#define PH  520
+#define PH  430
 
 void BuildPanel()
 {
    MkRect(PFX+"PBG",  InpPX, InpPY, PW, PH, InpBG, InpBRD, false);
 
    MkLbl(PFX+"PTit",  InpPX+6,  InpPY+7,
-         " MANIPULATION ZONES v1.1", clrWhite, InpFS+1);
+         " MANIPULATION ZONES v1.2", clrWhite, InpFS+1);
    MkLbl(PFX+"PSep0", InpPX+5,  InpPY+25,
          "-----------------------------------", InpBRD, InpFS-2);
 
@@ -593,14 +583,9 @@ void BuildPanel()
          "-----------------------------------", InpBRD, InpFS-2);
    by += 18;
 
-   // EMAs
-   MkLbl(PFX+"PEmaTit", InpPX+6, by, " MEDIAS MOVILES", clrSilver, InpFS-1);
-   by += 18;
-   for(int e = 0; e < 3; e++)
-   {
-      BuildEmaBtn(e, by);
-      by += 28;
-   }
+   // Un solo boton para las 3 EMAs
+   BuildEmaBtn(by);
+   by += 36;
 
    MkLbl(PFX+"PSep2", InpPX+5, by+4,
          "-----------------------------------", InpBRD, InpFS-2);
@@ -634,38 +619,33 @@ string BtnText(int z)
    return (g_zOn[z] ? "[ON ] " : "[OFF] ") + lbl[z];
 }
 
-void BuildEmaBtn(int e, int y)
+void BuildEmaBtn(int y)
 {
-   string bgN  = StringFormat("%sEma%d_BG",  PFX, e);
-   string txtN = StringFormat("%sEma%d_TXT", PFX, e);
-   color  bg   = g_emaOn[e] ? C'0,110,55' : C'120,20,20';
-
-   MkRect(bgN,  InpPX+5, y, PW-10, 26, bg, bg, true);
-   MkLbl(txtN, InpPX+12, y+5, EmaBtnText(e), clrWhite, InpFS);
+   color bg = g_emaOn ? C'0,110,55' : C'120,20,20';
+   MkRect(PFX+"EmaBtn_BG",  InpPX+5, y, PW-10, 28, bg, bg, true);
+   MkLbl(PFX+"EmaBtn_TXT", InpPX+12, y+7, EmaBtnText(), clrWhite, InpFS);
 }
 
-void UpdateEmaButtonVisual(int e)
+void UpdateEmaButtonVisual()
 {
-   string bgN  = StringFormat("%sEma%d_BG",  PFX, e);
-   string txtN = StringFormat("%sEma%d_TXT", PFX, e);
-   color  bg   = g_emaOn[e] ? C'0,110,55' : C'120,20,20';
-
-   ObjectSetInteger(0, bgN,  OBJPROP_BGCOLOR, bg);
-   ObjectSetInteger(0, bgN,  OBJPROP_COLOR,   bg);
-   ObjectSetString(0,  txtN, OBJPROP_TEXT, EmaBtnText(e));
+   color bg = g_emaOn ? C'0,110,55' : C'120,20,20';
+   ObjectSetInteger(0, PFX+"EmaBtn_BG",  OBJPROP_BGCOLOR, bg);
+   ObjectSetInteger(0, PFX+"EmaBtn_BG",  OBJPROP_COLOR,   bg);
+   ObjectSetString(0,  PFX+"EmaBtn_TXT", OBJPROP_TEXT, EmaBtnText());
 }
 
-string EmaBtnText(int e)
+string EmaBtnText()
 {
-   int    per[] = {InpEMA1Period, InpEMA2Period, InpEMA3Period};
-   return StringFormat("%s EMA %d", g_emaOn[e] ? "[ON ]" : "[OFF]", per[e]);
+   string state = g_emaOn ? "[ON ]" : "[OFF]";
+   return StringFormat("%s EMA %d / %d / %d", state,
+                       InpEMA1Period, InpEMA2Period, InpEMA3Period);
 }
 
 void ApplyEmaVisibility()
 {
-   PlotIndexSetInteger(0, PLOT_LINE_COLOR, g_emaOn[0] ? InpEMA1Color : clrNONE);
-   PlotIndexSetInteger(1, PLOT_LINE_COLOR, g_emaOn[1] ? InpEMA2Color : clrNONE);
-   PlotIndexSetInteger(2, PLOT_LINE_COLOR, g_emaOn[2] ? InpEMA3Color : clrNONE);
+   PlotIndexSetInteger(0, PLOT_LINE_COLOR, g_emaOn ? InpEMA1Color : clrNONE);
+   PlotIndexSetInteger(1, PLOT_LINE_COLOR, g_emaOn ? InpEMA2Color : clrNONE);
+   PlotIndexSetInteger(2, PLOT_LINE_COLOR, g_emaOn ? InpEMA3Color : clrNONE);
 }
 
 //============================================================
