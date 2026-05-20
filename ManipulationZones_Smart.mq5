@@ -10,11 +10,30 @@
 //|                                                                    |
 //|  Para XM: InpServerToNY = 7  (normalmente constante todo el año)  |
 //+------------------------------------------------------------------+
-#property copyright "ManipulationZones_Smart v1.0"
-#property version   "1.00"
+#property copyright "ManipulationZones_Smart v1.1"
+#property version   "1.10"
 #property indicator_chart_window
-#property indicator_plots 0
-#property description "Zonas de manipulacion H/L/50% + Panel MTF inteligente"
+#property indicator_buffers 3
+#property indicator_plots   3
+#property description "Zonas de manipulacion H/L/50% + EMAs 20/50/150 + Panel MTF"
+
+#property indicator_label1  "EMA 20"
+#property indicator_type1   DRAW_LINE
+#property indicator_color1  clrDodgerBlue
+#property indicator_style1  STYLE_SOLID
+#property indicator_width1  1
+
+#property indicator_label2  "EMA 50"
+#property indicator_type2   DRAW_LINE
+#property indicator_color2  clrOrange
+#property indicator_style2  STYLE_SOLID
+#property indicator_width2  2
+
+#property indicator_label3  "EMA 150"
+#property indicator_type3   DRAW_LINE
+#property indicator_color3  clrMagenta
+#property indicator_style3  STYLE_SOLID
+#property indicator_width3  2
 
 //============================================================
 // ESTRUCTURAS
@@ -74,9 +93,18 @@ input group "=== ESTILO DE LINEAS ==="
 input ENUM_LINE_STYLE HighLowStyle = STYLE_SOLID; // Estilo High / Low
 input ENUM_LINE_STYLE MidStyle     = STYLE_DOT;   // Estilo 50%
 
+input group "=== MEDIAS MOVILES (EN GRAFICO) ==="
+input int    InpEMA1Period = 20;          // Periodo EMA 1 (rapida)
+input int    InpEMA2Period = 50;          // Periodo EMA 2 (media)
+input int    InpEMA3Period = 150;         // Periodo EMA 3 (lenta)
+input color  InpEMA1Color  = clrDodgerBlue;
+input color  InpEMA2Color  = clrOrange;
+input color  InpEMA3Color  = clrMagenta;
+input bool   InpShowEMA1   = true;        // Mostrar EMA 1 al inicio
+input bool   InpShowEMA2   = true;        // Mostrar EMA 2 al inicio
+input bool   InpShowEMA3   = true;        // Mostrar EMA 3 al inicio
+
 input group "=== TENDENCIA MTF ==="
-input int    InpFastEMA   = 20;    // Periodo EMA Rapida
-input int    InpSlowEMA   = 50;    // Periodo EMA Lenta
 input bool   InpAlerts    = true;  // Alertas pop-up al cambiar tendencia
 input bool   InpPush      = false; // Notificacion push al movil
 
@@ -96,6 +124,16 @@ const string PFX = "MZ_";
 bool         g_zOn[4];
 ZoneWindow   g_zw[4];
 
+// EMAs visibles en grafico (timeframe actual)
+double       g_bufE1[];
+double       g_bufE2[];
+double       g_bufE3[];
+int          g_hE1 = INVALID_HANDLE;
+int          g_hE2 = INVALID_HANDLE;
+int          g_hE3 = INVALID_HANDLE;
+bool         g_emaOn[3];
+
+// EMAs para calculo de tendencia multi-TF (no se dibujan)
 int g_hFM1 = INVALID_HANDLE, g_hSM1 = INVALID_HANDLE;
 int g_hFM2 = INVALID_HANDLE, g_hSM2 = INVALID_HANDLE;
 int g_hFM5 = INVALID_HANDLE, g_hSM5 = INVALID_HANDLE;
@@ -122,23 +160,55 @@ int OnInit()
 
    ArrayInitialize(g_prevTrend, 0);
 
-   g_hFM1 = iMA(_Symbol, PERIOD_M1,  InpFastEMA, 0, MODE_EMA, PRICE_CLOSE);
-   g_hSM1 = iMA(_Symbol, PERIOD_M1,  InpSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
-   g_hFM2 = iMA(_Symbol, PERIOD_M2,  InpFastEMA, 0, MODE_EMA, PRICE_CLOSE);
-   g_hSM2 = iMA(_Symbol, PERIOD_M2,  InpSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
-   g_hFM5 = iMA(_Symbol, PERIOD_M5,  InpFastEMA, 0, MODE_EMA, PRICE_CLOSE);
-   g_hSM5 = iMA(_Symbol, PERIOD_M5,  InpSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
-   g_hFH1 = iMA(_Symbol, PERIOD_H1,  InpFastEMA, 0, MODE_EMA, PRICE_CLOSE);
-   g_hSH1 = iMA(_Symbol, PERIOD_H1,  InpSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
-   g_hFH4 = iMA(_Symbol, PERIOD_H4,  InpFastEMA, 0, MODE_EMA, PRICE_CLOSE);
-   g_hSH4 = iMA(_Symbol, PERIOD_H4,  InpSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
+   // --- Buffers para EMAs visibles ---
+   SetIndexBuffer(0, g_bufE1, INDICATOR_DATA);
+   SetIndexBuffer(1, g_bufE2, INDICATOR_DATA);
+   SetIndexBuffer(2, g_bufE3, INDICATOR_DATA);
+   ArraySetAsSeries(g_bufE1, false);
+   ArraySetAsSeries(g_bufE2, false);
+   ArraySetAsSeries(g_bufE3, false);
 
-   if(g_hFH1 == INVALID_HANDLE || g_hSH1 == INVALID_HANDLE ||
-      g_hFH4 == INVALID_HANDLE || g_hSH4 == INVALID_HANDLE)
+   PlotIndexSetString(0,  PLOT_LABEL, StringFormat("EMA %d", InpEMA1Period));
+   PlotIndexSetString(1,  PLOT_LABEL, StringFormat("EMA %d", InpEMA2Period));
+   PlotIndexSetString(2,  PLOT_LABEL, StringFormat("EMA %d", InpEMA3Period));
+   PlotIndexSetInteger(0, PLOT_LINE_COLOR, InpEMA1Color);
+   PlotIndexSetInteger(1, PLOT_LINE_COLOR, InpEMA2Color);
+   PlotIndexSetInteger(2, PLOT_LINE_COLOR, InpEMA3Color);
+   PlotIndexSetDouble(0,  PLOT_EMPTY_VALUE, EMPTY_VALUE);
+   PlotIndexSetDouble(1,  PLOT_EMPTY_VALUE, EMPTY_VALUE);
+   PlotIndexSetDouble(2,  PLOT_EMPTY_VALUE, EMPTY_VALUE);
+
+   g_emaOn[0] = InpShowEMA1;
+   g_emaOn[1] = InpShowEMA2;
+   g_emaOn[2] = InpShowEMA3;
+   ApplyEmaVisibility();
+
+   // --- Handles EMAs visibles (current TF) ---
+   g_hE1 = iMA(_Symbol, Period(), InpEMA1Period, 0, MODE_EMA, PRICE_CLOSE);
+   g_hE2 = iMA(_Symbol, Period(), InpEMA2Period, 0, MODE_EMA, PRICE_CLOSE);
+   g_hE3 = iMA(_Symbol, Period(), InpEMA3Period, 0, MODE_EMA, PRICE_CLOSE);
+
+   // --- Handles EMAs para tendencia multi-TF (usan 20/50) ---
+   g_hFM1 = iMA(_Symbol, PERIOD_M1,  InpEMA1Period, 0, MODE_EMA, PRICE_CLOSE);
+   g_hSM1 = iMA(_Symbol, PERIOD_M1,  InpEMA2Period, 0, MODE_EMA, PRICE_CLOSE);
+   g_hFM2 = iMA(_Symbol, PERIOD_M2,  InpEMA1Period, 0, MODE_EMA, PRICE_CLOSE);
+   g_hSM2 = iMA(_Symbol, PERIOD_M2,  InpEMA2Period, 0, MODE_EMA, PRICE_CLOSE);
+   g_hFM5 = iMA(_Symbol, PERIOD_M5,  InpEMA1Period, 0, MODE_EMA, PRICE_CLOSE);
+   g_hSM5 = iMA(_Symbol, PERIOD_M5,  InpEMA2Period, 0, MODE_EMA, PRICE_CLOSE);
+   g_hFH1 = iMA(_Symbol, PERIOD_H1,  InpEMA1Period, 0, MODE_EMA, PRICE_CLOSE);
+   g_hSH1 = iMA(_Symbol, PERIOD_H1,  InpEMA2Period, 0, MODE_EMA, PRICE_CLOSE);
+   g_hFH4 = iMA(_Symbol, PERIOD_H4,  InpEMA1Period, 0, MODE_EMA, PRICE_CLOSE);
+   g_hSH4 = iMA(_Symbol, PERIOD_H4,  InpEMA2Period, 0, MODE_EMA, PRICE_CLOSE);
+
+   if(g_hE1==INVALID_HANDLE || g_hE2==INVALID_HANDLE || g_hE3==INVALID_HANDLE ||
+      g_hFH1==INVALID_HANDLE || g_hSH1==INVALID_HANDLE ||
+      g_hFH4==INVALID_HANDLE || g_hSH4==INVALID_HANDLE)
    {
       Alert("ManipulationZones: Error creando handles EMA (", GetLastError(), ")");
       return INIT_FAILED;
    }
+
+   IndicatorSetString(INDICATOR_SHORTNAME, "ManipulationZones_Smart");
 
    BuildPanel();
    ChartRedraw(0);
@@ -149,7 +219,8 @@ void OnDeinit(const int reason)
 {
    DeleteAllMZObjects();
 
-   int hArr[] = {g_hFM1,g_hSM1,g_hFM2,g_hSM2,g_hFM5,g_hSM5,
+   int hArr[] = {g_hE1,g_hE2,g_hE3,
+                 g_hFM1,g_hSM1,g_hFM2,g_hSM2,g_hFM5,g_hSM5,
                  g_hFH1,g_hSH1,g_hFH4,g_hSH4};
    for(int i = 0; i < ArraySize(hArr); i++)
       if(hArr[i] != INVALID_HANDLE) IndicatorRelease(hArr[i]);
@@ -172,10 +243,16 @@ int OnCalculate(const int rates_total,
                 const long     &volume[],
                 const int      &spread[])
 {
-   if(rates_total < InpSlowEMA + 5) return 0;
+   int maxPeriod = MathMax(InpEMA3Period, MathMax(InpEMA1Period, InpEMA2Period));
+   if(rates_total < maxPeriod + 5) return 0;
 
    if(prev_calculated <= 0)
       DeleteZoneLineObjects();
+
+   // --- Rellenar buffers EMA visibles ---
+   if(CopyBuffer(g_hE1, 0, 0, rates_total, g_bufE1) <= 0) return 0;
+   if(CopyBuffer(g_hE2, 0, 0, rates_total, g_bufE2) <= 0) return 0;
+   if(CopyBuffer(g_hE3, 0, 0, rates_total, g_bufE3) <= 0) return 0;
 
    RedrawZones();
    UpdateTrendPanel();
@@ -192,6 +269,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam,
 {
    if(id != CHARTEVENT_OBJECT_CLICK) return;
 
+   // --- Botones de zonas ---
    for(int z = 0; z < 4; z++)
    {
       string bgN  = StringFormat("%sBtn%d_BG",  PFX, z);
@@ -203,6 +281,22 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam,
          UpdateButtonVisual(z);
          DeleteZoneLineObjects();
          RedrawZones();
+         ChartRedraw(0);
+         return;
+      }
+   }
+
+   // --- Botones de EMAs ---
+   for(int e = 0; e < 3; e++)
+   {
+      string bgN  = StringFormat("%sEma%d_BG",  PFX, e);
+      string txtN = StringFormat("%sEma%d_TXT", PFX, e);
+
+      if(sparam == bgN || sparam == txtN)
+      {
+         g_emaOn[e] = !g_emaOn[e];
+         UpdateEmaButtonVisual(e);
+         ApplyEmaVisibility();
          ChartRedraw(0);
          return;
       }
@@ -365,7 +459,8 @@ void UpdateTrendPanel()
 
    ENUM_TIMEFRAMES tf = Period();
    string          tfStr = TFStr(tf);
-   int             y = InpPY + 172;
+   // Y base: 4 zonas (28*4) + 3 emas (28*3) + separadores/titulos
+   int             y = InpPY + 290;
 
    TLbl("HDR", InpPX+5, y,
         "--- TENDENCIA | TF: " + tfStr + " ---",
@@ -475,25 +570,39 @@ string TFStr(ENUM_TIMEFRAMES tf)
 //============================================================
 
 #define PW  215
-#define PH  410
+#define PH  520
 
 void BuildPanel()
 {
    MkRect(PFX+"PBG",  InpPX, InpPY, PW, PH, InpBG, InpBRD, false);
 
    MkLbl(PFX+"PTit",  InpPX+6,  InpPY+7,
-         " MANIPULATION ZONES v1.0", clrWhite, InpFS+1);
+         " MANIPULATION ZONES v1.1", clrWhite, InpFS+1);
    MkLbl(PFX+"PSep0", InpPX+5,  InpPY+25,
          "-----------------------------------", InpBRD, InpFS-2);
 
+   // Zonas
    int by = InpPY + 36;
    for(int z = 0; z < 4; z++)
    {
       BuildBtn(z, by);
-      by += 30;
+      by += 28;
    }
 
-   MkLbl(PFX+"PSep1", InpPX+5, by+8,
+   MkLbl(PFX+"PSep1", InpPX+5, by+4,
+         "-----------------------------------", InpBRD, InpFS-2);
+   by += 18;
+
+   // EMAs
+   MkLbl(PFX+"PEmaTit", InpPX+6, by, " MEDIAS MOVILES", clrSilver, InpFS-1);
+   by += 18;
+   for(int e = 0; e < 3; e++)
+   {
+      BuildEmaBtn(e, by);
+      by += 28;
+   }
+
+   MkLbl(PFX+"PSep2", InpPX+5, by+4,
          "-----------------------------------", InpBRD, InpFS-2);
 }
 
@@ -523,6 +632,40 @@ string BtnText(int z)
    string lbl[] = {"Z1: 3:30-4:00 AM", "Z2: 8:30-9:00 AM",
                    "Z3: 13:30-14:00 ", "Z4: 20:30-21:00 "};
    return (g_zOn[z] ? "[ON ] " : "[OFF] ") + lbl[z];
+}
+
+void BuildEmaBtn(int e, int y)
+{
+   string bgN  = StringFormat("%sEma%d_BG",  PFX, e);
+   string txtN = StringFormat("%sEma%d_TXT", PFX, e);
+   color  bg   = g_emaOn[e] ? C'0,110,55' : C'120,20,20';
+
+   MkRect(bgN,  InpPX+5, y, PW-10, 26, bg, bg, true);
+   MkLbl(txtN, InpPX+12, y+5, EmaBtnText(e), clrWhite, InpFS);
+}
+
+void UpdateEmaButtonVisual(int e)
+{
+   string bgN  = StringFormat("%sEma%d_BG",  PFX, e);
+   string txtN = StringFormat("%sEma%d_TXT", PFX, e);
+   color  bg   = g_emaOn[e] ? C'0,110,55' : C'120,20,20';
+
+   ObjectSetInteger(0, bgN,  OBJPROP_BGCOLOR, bg);
+   ObjectSetInteger(0, bgN,  OBJPROP_COLOR,   bg);
+   ObjectSetString(0,  txtN, OBJPROP_TEXT, EmaBtnText(e));
+}
+
+string EmaBtnText(int e)
+{
+   int    per[] = {InpEMA1Period, InpEMA2Period, InpEMA3Period};
+   return StringFormat("%s EMA %d", g_emaOn[e] ? "[ON ]" : "[OFF]", per[e]);
+}
+
+void ApplyEmaVisibility()
+{
+   PlotIndexSetInteger(0, PLOT_LINE_COLOR, g_emaOn[0] ? InpEMA1Color : clrNONE);
+   PlotIndexSetInteger(1, PLOT_LINE_COLOR, g_emaOn[1] ? InpEMA2Color : clrNONE);
+   PlotIndexSetInteger(2, PLOT_LINE_COLOR, g_emaOn[2] ? InpEMA3Color : clrNONE);
 }
 
 //============================================================
