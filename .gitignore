@@ -38,3 +38,17 @@ captures/
 
 # Keystore files
 *.jks
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Secrets / entorno local
+.env
+.env.local
+*.session
+
