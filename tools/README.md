@@ -1,5 +1,67 @@
 # 🛠 Tools — Mantenimiento Windows
 
+Tenés 2 scripts:
+
+| Script | Para qué | Frecuencia |
+|--------|----------|------------|
+| `optimizar-pc.bat` | Limpieza general + navegadores | mensual |
+| `optimizar-arranque.bat` | Acelera el arranque de Windows | una vez (y revisar cada 2-3 meses) |
+
+---
+
+## `optimizar-arranque.bat`
+
+Optimiza el **boot de Windows** y los programas que se cargan al iniciar.
+Hace el arranque más rápido y libera RAM al inicio.
+
+### Menú
+
+| Opción | Qué hace |
+|--------|----------|
+| 1 | Lista programas que arrancan con Windows |
+| 2 | Lista servicios automáticos |
+| 3 | Desactiva bloatware común del arranque (OneDrive, Spotify, Teams, Xbox, Adobe Updater…) |
+| 4 | Optimiza boot con `bcdedit` (timeout 3s, usa todos los núcleos, sin GUI) |
+| 5 | Activa Fast Startup |
+| 6 | Pone servicios innecesarios en MANUAL (telemetría, Xbox, Fax, etc.) |
+| 7 | Desactiva tareas programadas de telemetría |
+| 8 | Muestra tiempos de arranque de los últimos 10 boots |
+| 9 | Genera **reporte HTML** en el Escritorio |
+| **A** | Aplica TODO (con confirmación) |
+| **R** | Restaurar valores por defecto si algo no te gustó |
+
+### Lo bueno
+
+- Todo es **reversible** (los servicios pasan a "Manual", no se eliminan).
+- Te **pregunta antes** de los pasos riesgosos (servicios opcionales).
+- Genera un reporte HTML para que veas el "antes y después".
+- Muestra los tiempos de boot reales (medidos por Windows).
+
+### Tiempos típicos después de optimizar
+
+| Equipo | Antes | Después |
+|--------|-------|---------|
+| SSD NVMe | 20-30 s | **5-12 s** |
+| SSD SATA | 30-50 s | **10-20 s** |
+| HDD | 90-180 s | 30-60 s |
+
+### Si algo se rompe
+
+Corré la opción **R** (Restaurar) o desde un símbolo del sistema admin:
+
+```bat
+bcdedit /timeout 30
+bcdedit /deletevalue quietboot
+```
+
+Para re-activar un servicio:
+```bat
+sc config <NombreServicio> start= auto
+sc start <NombreServicio>
+```
+
+---
+
 ## `optimizar-pc.bat`
 
 Script con menú interactivo para optimizar Windows + limpiar navegadores
