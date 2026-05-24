@@ -1,11 +1,70 @@
 # 🛠 Tools — Mantenimiento Windows
 
-Tenés 2 scripts:
+Tenés 3 scripts. Recomiendo correrlos en este orden la primera vez:
 
-| Script | Para qué | Frecuencia |
-|--------|----------|------------|
-| `optimizar-pc.bat` | Limpieza general + navegadores | mensual |
-| `optimizar-arranque.bat` | Acelera el arranque de Windows | una vez (y revisar cada 2-3 meses) |
+| Orden | Script | Para qué | Frecuencia |
+|-------|--------|----------|------------|
+| 1 | `optimizar-pc.bat` | Limpieza general + navegadores | mensual |
+| 2 | `optimizar-arranque.bat` | Acelera el arranque de Windows | una vez (revisar cada 2-3 meses) |
+| 3 | `optimizar-rendimiento.bat` | RAM, memoria virtual, liberar C:, modo alto rendimiento | una vez + opciones puntuales |
+
+---
+
+## `optimizar-rendimiento.bat` ⚡
+
+El más potente de los 3. Trabaja sobre rendimiento general, memoria y espacio.
+
+### Menú
+
+| Opción | Qué hace |
+|--------|----------|
+| 1 | Analiza espacio en C: y muestra las carpetas más pesadas |
+| 2 | Busca archivos gigantes (>500 MB) en C: |
+| **3** | **Libera espacio AGRESIVO** en C: (Windows.old, drivers viejos, cache, dumps, WER, shaders…) |
+| **4** | **Configura Memoria Virtual** óptima según tu RAM (detecta automáticamente) |
+| 5 | Libera RAM en uso ahora (vacía working sets) |
+| 6 | Efectos visuales para mejor rendimiento (sin animaciones, transparencias…) |
+| **7** | **Alto Rendimiento** + sin throttling de CPU + Modo Juego activo |
+| 8 | Desactivar features de Windows (IE, WMP, XPS, Telnet, apps inútiles) |
+| 9 | Optimizar Windows Defender (limita CPU, excluye cache navegadores) |
+| **A** | **Limpiar WinSxS** y driver store (libera 5-15 GB) |
+| B | Mover carpetas Documentos/Descargas a otra unidad (asistente) |
+| **C** | **Aplicar TODO** (recomendado primera vez) |
+
+### Lo que vas a recuperar
+
+| Acción | Espacio liberado típico |
+|--------|-------------------------|
+| Windows.old (si existe) | 10-30 GB |
+| Cache de Windows Update | 3-10 GB |
+| WinSxS limpio | 5-15 GB |
+| Cache de navegadores | 1-5 GB |
+| Drivers viejos | 1-4 GB |
+| **TOTAL típico** | **20-60 GB** |
+
+### Memoria virtual (Pagefile)
+
+Detecta tu RAM y calcula automáticamente:
+
+| Tu RAM | Pagefile recomendado |
+|--------|----------------------|
+| 4 GB | 6144 - 12288 MB |
+| 8 GB | 4096 - 8192 MB |
+| 16 GB | 4096 - 8192 MB |
+| 32 GB+ | 2048 - 4096 MB |
+
+### Alto Rendimiento
+
+- Plan **Ultimate Performance** (oculto en Windows 10/11)
+- CPU mínimo 100% (sin throttling)
+- Sin core parking
+- USB sin suspensión selectiva
+- Modo Juego siempre activo
+- Power throttling de apps en background apagado
+
+---
+
+## `optimizar-arranque.bat`
 
 ---
 
