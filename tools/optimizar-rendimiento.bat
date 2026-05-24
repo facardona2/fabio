@@ -64,7 +64,8 @@ powershell -NoProfile -Command "$d = Get-PSDrive C; $u = [math]::Round($d.Used/1
 
 echo.
 echo --- Carpetas mas pesadas en C: (top 15) ---
-powershell -NoProfile -Command "Get-ChildItem C:\ -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object { $s = (Get-ChildItem $_.FullName -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum; [PSCustomObject]@{Folder=$_.Name; SizeGB=[math]::Round($s/1GB,2)} } | Sort-Object SizeGB -Descending | Select-Object -First 15 | Format-Table -AutoSize"
+echo  Calculando (puede tardar 1-2 min)...
+powershell -NoProfile -Command "Get-ChildItem C:\ -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object { $s = (Get-ChildItem -LiteralPath $_.FullName -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum; if ($s -eq $null) { $s = 0 }; [PSCustomObject]@{Folder=$_.Name; SizeGB=[math]::Round($s/1GB,2)} } | Sort-Object SizeGB -Descending | Select-Object -First 15 | Format-Table -AutoSize"
 
 echo.
 if defined RUN_MODE goto :eof
