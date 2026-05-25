@@ -118,14 +118,11 @@ DISM /Online /Cleanup-Image /StartComponentCleanup
 echo     OK
 
 echo  -^> Windows.old...
-if exist "C:\Windows.old" (
-    takeown /F "C:\Windows.old" /R /D Y >nul 2>&1
-    icacls "C:\Windows.old" /grant administrators:F /T >nul 2>&1
-    rd /s /q "C:\Windows.old" >nul 2>&1
-    echo     OK - Windows.old eliminado
-) else (
-    echo     . no existe
-)
+if exist "C:\Windows.old" takeown /F "C:\Windows.old" /R /D S >nul 2>&1
+if exist "C:\Windows.old" icacls "C:\Windows.old" /grant administradores:F /T >nul 2>&1
+if exist "C:\Windows.old" icacls "C:\Windows.old" /grant administrators:F /T >nul 2>&1
+if exist "C:\Windows.old" rd /s /q "C:\Windows.old" >nul 2>&1
+if exist "C:\Windows.old" (echo     parcial - quedan restos protegidos) else (echo     OK)
 
 echo  -^> Logs de Windows...
 del /f /s /q "C:\Windows\Logs\*.*" >nul 2>&1
@@ -236,7 +233,7 @@ echo.
 echo === LIBERAR RAM EN USO ===
 echo.
 
-powershell -NoProfile -Command "$before = (Get-Counter '\Memory\Available MBytes').CounterSamples.CookedValue; Write-Host ('  RAM disponible ANTES:   ' + [int]$before + ' MB'); $sig = '[DllImport(\"psapi.dll\")] public static extern int EmptyWorkingSet(IntPtr hwProc);'; $type = Add-Type -MemberDefinition $sig -Name Win32 -Namespace Mem -PassThru; $skip = @('System','Idle','Registry','Memory Compression','smss','csrss','wininit','services','lsass','winlogon'); Get-Process | Where-Object { $skip -notcontains $_.Name } | ForEach-Object { try { $null = $type::EmptyWorkingSet($_.Handle) } catch {} }; Start-Sleep -Seconds 2; $after = (Get-Counter '\Memory\Available MBytes').CounterSamples.CookedValue; Write-Host ('  RAM disponible DESPUES: ' + [int]$after + ' MB'); Write-Host ('  Liberado: ' + [int]($after - $before) + ' MB')"
+powershell -NoProfile -Command "$before = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024; Write-Host ('  RAM disponible ANTES:   ' + [int]$before + ' MB'); $sig = '[DllImport(\"psapi.dll\")] public static extern int EmptyWorkingSet(IntPtr hwProc);'; $type = Add-Type -MemberDefinition $sig -Name Win32 -Namespace Mem -PassThru; $skip = @('System','Idle','Registry','Memory Compression','smss','csrss','wininit','services','lsass','winlogon'); Get-Process | Where-Object { $skip -notcontains $_.Name } | ForEach-Object { try { $null = $type::EmptyWorkingSet($_.Handle) } catch {} }; Start-Sleep -Seconds 2; $after = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024; Write-Host ('  RAM disponible DESPUES: ' + [int]$after + ' MB'); Write-Host ('  Liberado: ' + [int]($after - $before) + ' MB')"
 
 echo.
 if defined RUN_MODE goto :eof
