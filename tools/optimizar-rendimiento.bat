@@ -64,8 +64,8 @@ powershell -NoProfile -Command "$d = Get-PSDrive C; $u = [math]::Round($d.Used/1
 
 echo.
 echo --- Carpetas mas pesadas en C: (top 15) ---
-echo  Calculando (puede tardar 1-2 min)...
-powershell -NoProfile -Command "Get-ChildItem C:\ -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object { $s = (Get-ChildItem -LiteralPath $_.FullName -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum; if ($s -eq $null) { $s = 0 }; [PSCustomObject]@{Folder=$_.Name; SizeGB=[math]::Round($s/1GB,2)} } | Sort-Object SizeGB -Descending | Select-Object -First 15 | Format-Table -AutoSize"
+echo  Calculando (puede tardar 1-2 min, omite OneDrive nube y enlaces)...
+powershell -NoProfile -Command "Get-ChildItem C:\ -Directory -Force -ErrorAction SilentlyContinue | Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } | ForEach-Object { $s = (Get-ChildItem -LiteralPath $_.FullName -Recurse -File -Force -ErrorAction SilentlyContinue | Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::Offline) } | Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum; if ($s -eq $null) { $s = 0 }; [PSCustomObject]@{Folder=$_.Name; SizeGB=[math]::Round($s/1GB,2)} } | Sort-Object SizeGB -Descending | Select-Object -First 15 | Format-Table -AutoSize"
 
 echo.
 if defined RUN_MODE goto :eof
@@ -76,9 +76,14 @@ goto MENU
 :BIG_FILES
 echo.
 echo === ARCHIVOS GRANDES (^>500 MB) ===
-echo  Puede tardar 1-3 min...
+echo  Escaneando solo carpetas relevantes (omite OneDrive nube,
+echo  enlaces y archivos de sistema). Puede tardar 1-3 min...
 echo.
-powershell -NoProfile -Command "Get-ChildItem C:\ -Recurse -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.Length -gt 500MB } | Sort-Object Length -Descending | Select-Object @{n='SizeGB';e={[math]::Round($_.Length/1GB,2)}}, FullName -First 30 | Format-Table -AutoSize -Wrap"
+echo  Presiona Ctrl+C en cualquier momento para cancelar (no borra nada).
+echo.
+powershell -NoProfile -Command "$roots = @(\"$env:USERPROFILE\", 'C:\Program Files', 'C:\Program Files (x86)', 'C:\ProgramData', 'C:\Windows\Temp', 'C:\Windows\Installer'); $results = foreach ($r in $roots) { if (Test-Path $r) { Get-ChildItem -LiteralPath $r -Recurse -File -Force -ErrorAction SilentlyContinue | Where-Object { ($_.Length -gt 500MB) -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and -not ($_.Attributes -band [IO.FileAttributes]::Offline) } } }; $results | Sort-Object Length -Descending | Select-Object @{n='SizeGB';e={[math]::Round($_.Length/1GB,2)}}, FullName -First 30 | Format-Table -AutoSize -Wrap"
+echo.
+echo  [OK] Busqueda terminada.
 if defined RUN_MODE goto :eof
 pause
 goto MENU
