@@ -113,8 +113,8 @@ if exist "C:\Windows\SoftwareDistribution\Download" (
 net start wuauserv >nul 2>&1
 echo     OK
 
-echo  -^> Component cleanup (DISM)...
-DISM /Online /Cleanup-Image /StartComponentCleanup /Quiet
+echo  -^> Component cleanup (DISM, puede tardar varios min)...
+DISM /Online /Cleanup-Image /StartComponentCleanup
 echo     OK
 
 echo  -^> Windows.old...
@@ -140,7 +140,9 @@ del /f /q "%LOCALAPPDATA%\CrashDumps\*.*" >nul 2>&1
 echo     OK
 
 echo  -^> Microsoft Store cache...
-wsreset.exe >nul 2>&1
+if exist "%LOCALAPPDATA%\Packages\Microsoft.WindowsStore_8wekyb3d8bbwe\LocalCache" (
+    del /f /s /q "%LOCALAPPDATA%\Packages\Microsoft.WindowsStore_8wekyb3d8bbwe\LocalCache\*" >nul 2>&1
+)
 echo     OK
 
 echo  -^> Reportes WER...
@@ -163,11 +165,15 @@ del /f /s /q "%LOCALAPPDATA%\Microsoft\Windows\Explorer\thumbcache_*.db" >nul 2>
 del /f /s /q "%LOCALAPPDATA%\Microsoft\Windows\Explorer\iconcache_*.db" >nul 2>&1
 echo     OK
 
-echo  -^> Cleanmgr (todas las categorias)...
-for %%K in ("Active Setup Temp Folders" "BranchCache" "D3D Shader Cache" "Delivery Optimization Files" "Downloaded Program Files" "Internet Cache Files" "Memory Dump Files" "Old ChkDsk Files" "Previous Installations" "Recycle Bin" "Service Pack Cleanup" "Setup Log Files" "System error memory dump files" "System error minidump files" "Temporary Files" "Temporary Setup Files" "Temporary Sync Files" "Thumbnail Cache" "Update Cleanup" "Upgrade Discarded Files" "Windows Defender" "Windows Error Reporting Files" "Windows ESD installation files" "Windows Upgrade Log Files") do (
-    reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VolumeCaches\%%~K" /v StateFlags9999 /t REG_DWORD /d 2 /f >nul 2>&1
+echo  -^> Delivery Optimization (archivos de updates P2P)...
+if exist "C:\Windows\SoftwareDistribution\DeliveryOptimization" (
+    del /f /s /q "C:\Windows\SoftwareDistribution\DeliveryOptimization\*" >nul 2>&1
 )
-cleanmgr /sagerun:9999 >nul 2>&1
+echo     OK
+
+echo  -^> Temporales adicionales...
+del /f /s /q "%TEMP%\*.*" >nul 2>&1
+del /f /s /q "C:\Windows\Temp\*.*" >nul 2>&1
 echo     OK
 
 echo.
