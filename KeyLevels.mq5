@@ -147,11 +147,11 @@ void DrawLevel(string name, double price, color clr, int width,
 
    // Crear nueva
    if(!ObjectCreate(0, name, OBJ_HLINE, 0, 0, price)) return;
-   ObjectSetInteger(0, name, OBJPROP_COLOR,      clr);
-   ObjectSetInteger(0, name, OBJPROP_WIDTH,      width);
-   ObjectSetInteger(0, name, OBJPROP_STYLE,      style);
-   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, name, OBJPROP_HIDDEN,     false);
+   ObjectSetInteger(0, name, OBJPROP_COLOR,      (long)clr);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH,      (long)width);
+   ObjectSetInteger(0, name, OBJPROP_STYLE,      (long)style);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, 0);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN,     0);
 
    // Etiqueta de texto
    if(InpShowLabels)
@@ -160,11 +160,11 @@ void DrawLevel(string name, double price, color clr, int width,
       datetime t_label = TimeCurrent();
       if(!ObjectCreate(0, ln, OBJ_TEXT, 0, t_label, price)) return;
       ObjectSetString(0,  ln, OBJPROP_TEXT,       " " + lbl + "  " + DoubleToString(price, _Digits));
-      ObjectSetInteger(0, ln, OBJPROP_COLOR,      clr);
-      ObjectSetInteger(0, ln, OBJPROP_FONTSIZE,   InpLabelSize);
+      ObjectSetInteger(0, ln, OBJPROP_COLOR,      (long)clr);
+      ObjectSetInteger(0, ln, OBJPROP_FONTSIZE,   (long)InpLabelSize);
       ObjectSetString(0,  ln, OBJPROP_FONT,       "Arial Bold");
-      ObjectSetInteger(0, ln, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(0, ln, OBJPROP_HIDDEN,     false);
+      ObjectSetInteger(0, ln, OBJPROP_SELECTABLE, 0);
+      ObjectSetInteger(0, ln, OBJPROP_HIDDEN,     0);
      }
   }
 
