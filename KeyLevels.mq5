@@ -152,7 +152,6 @@ void DrawLevel(string name, double price, color clr, int width,
    ObjectSetInteger(0, name, OBJPROP_STYLE,      style);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN,     false);
-   ObjectSetInteger(0, name, OBJPROP_TOOLTIP,    false);
 
    // Etiqueta de texto
    if(InpShowLabels)
