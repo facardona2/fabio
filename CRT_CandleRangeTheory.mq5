@@ -16,8 +16,8 @@
 //|    • Cajas de sesión dibujadas UNA vez por día                 |
 //|    • ChartRedraw eliminado (MT5 lo hace automáticamente)        |
 //+------------------------------------------------------------------+
-#property copyright   "CRT - Candle Range Theory v4.0"
-#property version     "4.00"
+#property copyright   "CRT - Candle Range Theory v5.0"
+#property version     "5.00"
 #property indicator_chart_window
 #property indicator_buffers 6
 #property indicator_plots   6
@@ -117,6 +117,34 @@ input int    InpArrowSize      = 3;
 input int    InpManipSize      = 2;
 input int    InpArrowPips      = 10;
 
+input group "=== Números Redondos / Round Numbers ==="
+input bool   InpShowRound      = true;   // Mostrar números redondos (00) y cuartos (25/50/75)
+input double InpBigFigure      = 0.0;    // Tamaño big figure (0 = auto según instrumento)
+input bool   InpShowQuarters   = true;   // Mostrar cuartos (25 / 75)
+input bool   InpShowHalf       = true;   // Mostrar mitad (50)
+input int    InpRoundLevels    = 10;     // Cuántos niveles arriba y abajo dibujar
+input color  InpRound00Color   = C'200,200,0';   // Color nivel 00 (big figure)
+input color  InpRound50Color   = C'140,140,0';   // Color nivel 50
+input color  InpRoundQtrColor  = C'80,80,0';     // Color cuartos (25/75)
+input int    InpRound00Width   = 2;              // Grosor línea 00
+input int    InpRound50Width   = 1;              // Grosor línea 50
+input int    InpRoundQtrWidth  = 1;              // Grosor línea cuartos
+input bool   InpRoundFilter    = false;  // Solo mostrar señales CRT cerca de número redondo
+input double InpRoundZonePct   = 0.15;   // % del big figure = zona "cerca" de redondo
+
+input group "=== Niveles Clave / Key Levels ==="
+input bool   InpShowPDHL       = true;   // Previous Day High / Low (PDH/PDL)
+input bool   InpShowPWHL       = true;   // Previous Week High / Low (PWH/PWL)
+input bool   InpShowPMHL       = false;  // Previous Month High / Low (PMH/PML)
+input color  InpPDHColor       = C'0,180,255';   // Color Previous Day High
+input color  InpPDLColor       = C'255,80,0';    // Color Previous Day Low
+input color  InpPWHColor       = C'0,120,200';   // Color Previous Week High
+input color  InpPWLColor       = C'200,60,0';    // Color Previous Week Low
+input color  InpPMHColor       = C'0,80,160';    // Color Previous Month High
+input color  InpPMLColor       = C'160,40,0';    // Color Previous Month Low
+input int    InpKeyLevelWidth  = 2;              // Grosor líneas PDH/PDL/PWH/PWL
+input bool   InpKeyLevelLabel  = true;           // Mostrar etiquetas
+
 input group "=== Dashboard ==="
 input bool            InpDash       = true;
 input ENUM_BASE_CORNER InpDashCorner = CORNER_LEFT_UPPER;
@@ -145,6 +173,14 @@ int      g_htf_cnt     = 0;
 
 // Cache: session boxes (drawn once per day)
 datetime g_last_sess_day = 0;
+
+// Cache: key levels (refreshed on new day/week)
+datetime g_last_kl_day  = 0;
+datetime g_last_kl_week = 0;
+double   g_pdh = 0, g_pdl = 0;
+double   g_pwh = 0, g_pwl = 0;
+double   g_pmh = 0, g_pml = 0;
+double   g_big_figure = 0;  // computed once in OnInit
 
 //==================================================================
 //  INIT
@@ -183,8 +219,36 @@ int OnInit()
    g_atr = iATR(Symbol(), Period(), InpAtrPeriod);
    if(g_atr == INVALID_HANDLE) { Print("CRT: ATR error"); return INIT_FAILED; }
 
+   // Auto-detectar big figure según instrumento
+   g_big_figure = (InpBigFigure > 0.0) ? InpBigFigure : AutoBigFigure();
+
    IndicatorSetString(INDICATOR_SHORTNAME, "CRT [" + EnumToString(InpHTF) + "]");
    return INIT_SUCCEEDED;
+  }
+
+//==================================================================
+//  AUTO BIG FIGURE — detecta el tamaño del "nivel 00" según símbolo
+//  Forex 5d: 0.01 | JPY 3d: 1.0 | Gold: 50.0 | Indices: variable
+//==================================================================
+double AutoBigFigure()
+  {
+   double price  = SymbolInfoDouble(Symbol(), SYMBOL_BID);
+   int    digits = (int)SymbolInfoInteger(Symbol(), SYMBOL_DIGITS);
+
+   if(digits >= 4) return 0.01;          // EURUSD, GBPUSD, AUDUSD …
+   if(digits == 3) return 1.0;           // USDJPY, EURJPY (3-digit)
+   if(digits == 2)
+     {
+      if(price < 200)   return 1.0;      // USDJPY 2-digit
+      if(price < 3000)  return 50.0;     // XAUUSD (Gold) → 00 = 1950, 2000, 2050
+      return 500.0;                      // US30 / NAS100 burdo
+     }
+   if(digits <= 1)
+     {
+      if(price < 5000)  return 100.0;    // SPX500
+      return 1000.0;                     // NAS100, US30
+     }
+   return 0.01;
   }
 
 //==================================================================
@@ -314,6 +378,170 @@ void EntryArrow(string n, datetime t, double price, bool bull, string label_txt)
   }
 
 //==================================================================
+//  NÚMEROS REDONDOS — dibujados solo cuando cambia el rango visible
+//==================================================================
+
+// Línea horizontal simple de chart (reutiliza HLine pero con ray_right=true)
+void RoundLine(string n, double price, color clr, int width, ENUM_LINE_STYLE style,
+               string lbl = "")
+  {
+   if(ObjectFind(0, n) >= 0) return;  // ya existe → no recrear
+   if(!ObjectCreate(0, n, OBJ_HLINE, 0, 0, price)) return;
+   ObjectSetInteger(0, n, OBJPROP_COLOR,      clr);
+   ObjectSetInteger(0, n, OBJPROP_WIDTH,      width);
+   ObjectSetInteger(0, n, OBJPROP_STYLE,      style);
+   ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, n, OBJPROP_HIDDEN,     true);
+   if(lbl != "")
+     {
+      string ln = n + "_L";
+      if(ObjectFind(0, ln) >= 0) return;
+      datetime t_now = TimeCurrent();
+      if(!ObjectCreate(0, ln, OBJ_TEXT, 0, t_now, price)) return;
+      ObjectSetString(0,  ln, OBJPROP_TEXT,       " " + lbl);
+      ObjectSetInteger(0, ln, OBJPROP_COLOR,      clr);
+      ObjectSetInteger(0, ln, OBJPROP_FONTSIZE,   7);
+      ObjectSetString(0,  ln, OBJPROP_FONT,       "Arial Bold");
+      ObjectSetInteger(0, ln, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, ln, OBJPROP_HIDDEN,     true);
+     }
+  }
+
+void DrawRoundNumbers()
+  {
+   if(!InpShowRound) return;
+
+   double price = SymbolInfoDouble(Symbol(), SYMBOL_BID);
+   double bf    = g_big_figure;
+   double qtr   = bf * 0.25;
+
+   // Centro de la grilla en el nivel 00 más cercano al precio actual
+   double base = MathFloor(price / bf) * bf;
+
+   for(int i = -InpRoundLevels; i <= InpRoundLevels; i++)
+     {
+      double lvl_00 = NormalizeDouble(base + i * bf, _Digits);
+
+      // — nivel 00 (big figure) —
+      string n00 = g_pfx + "RN00_" + DoubleToString(lvl_00, _Digits);
+      string lbl_00 = DoubleToString(lvl_00, _Digits) + " [00]";
+      RoundLine(n00, lvl_00, InpRound00Color, InpRound00Width, STYLE_SOLID, lbl_00);
+
+      // — nivel 50 (mitad del big figure) —
+      if(InpShowHalf)
+        {
+         double lvl_50 = NormalizeDouble(lvl_00 + bf * 0.50, _Digits);
+         string n50 = g_pfx + "RN50_" + DoubleToString(lvl_50, _Digits);
+         RoundLine(n50, lvl_50, InpRound50Color, InpRound50Width, STYLE_DASH,
+                   DoubleToString(lvl_50, _Digits) + " [50]");
+        }
+
+      // — cuartos: 25 y 75 —
+      if(InpShowQuarters)
+        {
+         double lvl_25 = NormalizeDouble(lvl_00 + bf * 0.25, _Digits);
+         double lvl_75 = NormalizeDouble(lvl_00 + bf * 0.75, _Digits);
+         string n25 = g_pfx + "RN25_" + DoubleToString(lvl_25, _Digits);
+         string n75 = g_pfx + "RN75_" + DoubleToString(lvl_75, _Digits);
+         RoundLine(n25, lvl_25, InpRoundQtrColor, InpRoundQtrWidth, STYLE_DOT,
+                   DoubleToString(lvl_25, _Digits) + " [25]");
+         RoundLine(n75, lvl_75, InpRoundQtrColor, InpRoundQtrWidth, STYLE_DOT,
+                   DoubleToString(lvl_75, _Digits) + " [75]");
+        }
+     }
+  }
+
+// Devuelve true si 'price' está dentro de la zona de un número redondo
+bool NearRoundNumber(double price)
+  {
+   if(!InpRoundFilter) return true;  // filtro desactivado → siempre true
+   double bf   = g_big_figure;
+   double zone = bf * InpRoundZonePct;
+   double mod  = MathMod(MathAbs(price), bf * 0.25);  // distancia al cuarto más cercano
+   return (mod < zone || (bf * 0.25 - mod) < zone);
+  }
+
+//==================================================================
+//  KEY LEVELS: PDH/PDL, PWH/PWL, PMH/PML
+//==================================================================
+
+void KeyHLine(string n, double price, color clr, int width, string lbl)
+  {
+   // Usa OBJ_HLINE para que se extienda todo el chart
+   if(ObjectFind(0, n) >= 0)
+     {
+      // Ya existe → solo actualizar precio (puede cambiar de día a día)
+      ObjectSetDouble(0, n, OBJPROP_PRICE, price);
+      if(lbl != "" && ObjectFind(0, n+"_L") >= 0)
+         ObjectSetDouble(0, n+"_L", OBJPROP_PRICE, price);
+      return;
+     }
+   if(!ObjectCreate(0, n, OBJ_HLINE, 0, 0, price)) return;
+   ObjectSetInteger(0, n, OBJPROP_COLOR,      clr);
+   ObjectSetInteger(0, n, OBJPROP_WIDTH,      width);
+   ObjectSetInteger(0, n, OBJPROP_STYLE,      STYLE_DASH);
+   ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, n, OBJPROP_HIDDEN,     true);
+   if(InpKeyLevelLabel && lbl != "")
+     {
+      string ln = n + "_L";
+      datetime t = TimeCurrent();
+      if(!ObjectCreate(0, ln, OBJ_TEXT, 0, t, price)) return;
+      ObjectSetString(0,  ln, OBJPROP_TEXT,       " " + lbl);
+      ObjectSetInteger(0, ln, OBJPROP_COLOR,      clr);
+      ObjectSetInteger(0, ln, OBJPROP_FONTSIZE,   8);
+      ObjectSetString(0,  ln, OBJPROP_FONT,       "Arial Bold");
+      ObjectSetInteger(0, ln, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, ln, OBJPROP_HIDDEN,     true);
+     }
+  }
+
+void DrawKeyLevels()
+  {
+   //--- Previous Day High / Low
+   if(InpShowPDHL)
+     {
+      MqlRates d[];
+      ArraySetAsSeries(d, true);
+      if(CopyRates(Symbol(), PERIOD_D1, 1, 1, d) == 1)
+        {
+         g_pdh = d[0].high;
+         g_pdl = d[0].low;
+         KeyHLine(g_pfx+"PDH", g_pdh, InpPDHColor, InpKeyLevelWidth, "PDH");
+         KeyHLine(g_pfx+"PDL", g_pdl, InpPDLColor, InpKeyLevelWidth, "PDL");
+        }
+     }
+
+   //--- Previous Week High / Low
+   if(InpShowPWHL)
+     {
+      MqlRates w[];
+      ArraySetAsSeries(w, true);
+      if(CopyRates(Symbol(), PERIOD_W1, 1, 1, w) == 1)
+        {
+         g_pwh = w[0].high;
+         g_pwl = w[0].low;
+         KeyHLine(g_pfx+"PWH", g_pwh, InpPWHColor, InpKeyLevelWidth, "PWH");
+         KeyHLine(g_pfx+"PWL", g_pwl, InpPWLColor, InpKeyLevelWidth, "PWL");
+        }
+     }
+
+   //--- Previous Month High / Low
+   if(InpShowPMHL)
+     {
+      MqlRates m[];
+      ArraySetAsSeries(m, true);
+      if(CopyRates(Symbol(), PERIOD_MN1, 1, 1, m) == 1)
+        {
+         g_pmh = m[0].high;
+         g_pml = m[0].low;
+         KeyHLine(g_pfx+"PMH", g_pmh, InpPMHColor, InpKeyLevelWidth, "PMH");
+         KeyHLine(g_pfx+"PML", g_pml, InpPMLColor, InpKeyLevelWidth, "PML");
+        }
+     }
+  }
+
+//==================================================================
 //  SESSION BOXES — dibujadas UNA vez por día (no cada tick)
 //==================================================================
 void DrawOneDaySession(datetime day_broker, int h_start, int h_end,
@@ -377,17 +605,36 @@ void UpdateDash(int bull, int bear, int total, string last_sig, color lc, string
   {
    if(!InpDash) return;
    string p = g_pfx + "D_";
-   Dash(p+"r0",  "╔═══════════════════════════╗",                              clrGray,   0);
-   Dash(p+"r1",  "║   CRT  Candle Range Theory   ║",                           clrGold,   1);
-   Dash(p+"r2",  "║  HTF : " + StringFormat("%-21s", EnumToString(InpHTF)) + "║", clrSilver, 2);
-   Dash(p+"r3",  "╠═══════════════════════════╣",                              clrGray,   3);
-   Dash(p+"r4",  "║  Barras HTF : " + StringFormat("%-14d", total) +           "║",  clrSilver, 4);
-   Dash(p+"r5",  "║  Setups BULL: " + StringFormat("%-14d", bull) +            "║",  clrLime,   5);
-   Dash(p+"r6",  "║  Setups BEAR: " + StringFormat("%-14d", bear) +            "║",  clrRed,    6);
-   Dash(p+"r7",  "╠═══════════════════════════╣",                              clrGray,   7);
-   Dash(p+"r8",  "║  Sesión activa: " + StringFormat("%-12s", sess) +          "║",  clrAqua,   8);
-   Dash(p+"r9",  "║  Última señal : " + StringFormat("%-12s", last_sig) +      "║",  lc,        9);
-   Dash(p+"r10", "╚═══════════════════════════╝",                              clrGray,   10);
+
+   // Número redondo más cercano al precio actual
+   double price = SymbolInfoDouble(Symbol(), SYMBOL_BID);
+   double bf    = g_big_figure;
+   double nearest_00 = MathRound(price / bf) * bf;
+   double dist_pips  = MathAbs(price - nearest_00) / _Point / 10.0;
+
+   string pdh_s = (g_pdh > 0) ? DoubleToString(g_pdh, _Digits) : "---";
+   string pdl_s = (g_pdl > 0) ? DoubleToString(g_pdl, _Digits) : "---";
+   string pwh_s = (g_pwh > 0) ? DoubleToString(g_pwh, _Digits) : "---";
+   string pwl_s = (g_pwl > 0) ? DoubleToString(g_pwl, _Digits) : "---";
+   string rnd_s = DoubleToString(nearest_00, _Digits)
+                  + " (" + DoubleToString(dist_pips, 1) + "p)";
+
+   Dash(p+"r0",  "╔═══════════════════════════╗",                               clrGray,   0);
+   Dash(p+"r1",  "║   CRT  Candle Range Theory   ║",                            clrGold,   1);
+   Dash(p+"r2",  "║  HTF : " + StringFormat("%-21s", EnumToString(InpHTF)) + "║",  clrSilver, 2);
+   Dash(p+"r3",  "╠═══════════════════════════╣",                               clrGray,   3);
+   Dash(p+"r4",  "║  Bull: " + StringFormat("%-4d",bull) + "  Bear: " + StringFormat("%-15d",bear) + "║", clrSilver, 4);
+   Dash(p+"r5",  "║  Última señal : " + StringFormat("%-12s", last_sig) +       "║",  lc,        5);
+   Dash(p+"r6",  "╠═══════════════════════════╣",                               clrGray,   6);
+   Dash(p+"r7",  "║  Sesión activa: " + StringFormat("%-12s", sess) +           "║",  clrAqua,   7);
+   Dash(p+"r8",  "╠═══════════════════════════╣",                               clrGray,   8);
+   Dash(p+"r9",  "║  PDH: " + StringFormat("%-22s", pdh_s) +                    "║",  InpPDHColor, 9);
+   Dash(p+"r10", "║  PDL: " + StringFormat("%-22s", pdl_s) +                    "║",  InpPDLColor, 10);
+   Dash(p+"r11", "║  PWH: " + StringFormat("%-22s", pwh_s) +                    "║",  InpPWHColor, 11);
+   Dash(p+"r12", "║  PWL: " + StringFormat("%-22s", pwl_s) +                    "║",  InpPWLColor, 12);
+   Dash(p+"r13", "╠═══════════════════════════╣",                               clrGray,   13);
+   Dash(p+"r14", "║  RN00 cercano: " + StringFormat("%-13s", rnd_s) +           "║",  InpRound00Color, 14);
+   Dash(p+"r15", "╚═══════════════════════════╝",                               clrGray,   15);
   }
 
 //==================================================================
@@ -500,6 +747,9 @@ int OnCalculate(const int rates_total,
       CleanObjects();
       g_last_htf_t    = 0;
       g_last_sess_day = 0;
+      g_last_kl_day   = 0;
+      g_last_kl_week  = 0;
+      g_big_figure    = (InpBigFigure > 0.0) ? InpBigFigure : AutoBigFigure();
      }
 
    //--- ATR: solo copiar los barras necesarias (no todo rates_total)
@@ -519,16 +769,30 @@ int OnCalculate(const int rates_total,
      }
    if(g_htf_cnt < 3) return 0;
 
-   //--- Cajas de sesión: solo cuando cambia el día
+   //--- Cajas de sesión + Números redondos + Key levels: actualizados por día/semana
    datetime cur_utc = TimeCurrent() - InpGMTOffset * 3600;
    MqlDateTime mdt_now;
    TimeToStruct(cur_utc, mdt_now);
-   datetime cur_day = (datetime)(cur_utc - mdt_now.hour*3600 - mdt_now.min*60 - mdt_now.sec)
-                      + InpGMTOffset * 3600;
+   datetime cur_day  = (datetime)(cur_utc - mdt_now.hour*3600 - mdt_now.min*60 - mdt_now.sec)
+                       + InpGMTOffset * 3600;
+
+   // Semana: lunes de la semana actual
+   int day_of_week   = mdt_now.day_of_week;
+   datetime cur_week = cur_day - (datetime)((day_of_week == 0 ? 6 : day_of_week - 1) * 86400);
+
    if(cur_day != g_last_sess_day || prev_calculated == 0)
      {
       DrawSessionBoxes(time, rates_total);
+      DrawRoundNumbers();    // nuevos niveles si el precio se movió mucho
+      DrawKeyLevels();       // PDH/PDL y PMH/PML refrescados cada día
       g_last_sess_day = cur_day;
+      g_last_kl_day   = cur_day;
+     }
+
+   if(cur_week != g_last_kl_week || prev_calculated == 0)
+     {
+      DrawKeyLevels();       // PWH/PWL refrescado cada semana
+      g_last_kl_week = cur_week;
      }
 
    double pip = InpArrowPips * _Point;
@@ -616,8 +880,8 @@ int OnCalculate(const int rates_total,
          if(InpShowManip && ManipLowBuf[sw_bar] == EMPTY_VALUE)
             ManipLowBuf[sw_bar] = low[sw_bar] - pip;
 
-         // Flecha entrada y buffers (sesión)
-         if(IsActiveSession(time[sig_bar]))
+         // Flecha entrada y buffers (sesión + filtro número redondo)
+         if(IsActiveSession(time[sig_bar]) && NearRoundNumber(a_lo))
            {
             if(InpShowBuy && BuyBuf[sig_bar] == EMPTY_VALUE)
               {
@@ -672,7 +936,7 @@ int OnCalculate(const int rates_total,
          if(InpShowManip && ManipHighBuf[sw_bar] == EMPTY_VALUE)
             ManipHighBuf[sw_bar] = high[sw_bar] + pip;
 
-         if(IsActiveSession(time[sig_bar]))
+         if(IsActiveSession(time[sig_bar]) && NearRoundNumber(a_hi))
            {
             if(InpShowSell && SellBuf[sig_bar] == EMPTY_VALUE)
               {
